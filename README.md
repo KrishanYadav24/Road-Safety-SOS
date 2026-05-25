@@ -1,83 +1,54 @@
-# ROADSOS
+# Road Safety 2.0 (ROADSOS)
 
-ROADSOS is a location-based emergency response web application designed to help users quickly identify and contact nearby emergency services during road accidents. The platform reduces response time during the critical "golden hour" by providing fast access to emergency services and assistance.
+Road Safety 2.0 is a real-time emergency response web application designed to help users quickly identify and contact nearby emergency services during road accidents. The platform reduces response time during the critical "golden hour" by providing fast access to emergency services and a robust SOS system that works even in low-connectivity areas.
 
 ---
 
-## Problem Statement
+## Live Demo
 
-During road accidents, victims and bystanders often face difficulty locating nearby emergency facilities and contacting the right services quickly. Delays in receiving timely assistance can significantly affect outcomes.
-
-ROADSOS solves this problem by integrating emergency resources into a single platform that enables quick action and coordination.
+- **Frontend**: [https://roadsafetysos.vercel.app/](https://roadsafetysos.vercel.app/)
+- **Backend API**: [https://road-safety-sos.onrender.com](https://road-safety-sos.onrender.com)
 
 ---
 
 ## Features
 
-### Emergency Services
-
-- Nearby Hospitals and Trauma Centers
-- Nearby Ambulance Services
-- Nearby Police Stations
-- Vehicle Rescue and Towing Services
-- Nearby Puncture Shops and Service Centers
+### Emergency Services Discovery
+- **Live GPS Tracking**: Automatically detects user's current location.
+- **Interactive Maps**: Powered by Leaflet.js and OpenStreetMap.
+- **Categorized Search**: Find nearby Hospitals, Police Stations, Trauma Centers, and Repair/Towing services within a customizable radius (1km to 10km).
+- **Live Data**: Fetches real-time service information using the Overpass API.
 
 ### Core Functionalities
-
-- Live GPS Location Detection
-- Interactive Map Integration
-- One-Tap SOS Button
-- Emergency Contact Management
-- Direct Calling Functionality
-- Route Navigation
-- Real-Time Nearby Service Discovery
-- Responsive User Interface
-
-### Additional Features
-
-- Offline Emergency Contact Access
-- Cached Service Data
-- Live Location Sharing
-- Voice SOS Support (Future Scope)
-- Accident Detection (Future Scope)
+- **Secure Registration**: Includes **Email Verification** system via Gmail to ensure authentic users.
+- **One-Tap SOS**: Instantly broadcast your location to emergency responders.
+- **Dual-Role Dashboard**: 
+  - **Individual Users**: Access safety tools and trigger SOS.
+  - **Organizations**: Monitor active distress signals in real-time.
+- **Offline Reliability**: 
+  - **PWA Support**: App works offline via Service Workers.
+  - **SOS Queuing**: SOS alerts are queued locally if the network is lost and automatically synced when back online.
+  - **Resource Caching**: Previously searched emergency contacts are available even without internet.
 
 ---
 
 ## Tech Stack
 
 ### Frontend
-
-- React
-- Tailwind CSS
-- React Router
-- Axios
+- **Vanilla JavaScript (ES6+)**
+- **Tailwind CSS** (UI Styling via CDN)
+- **Leaflet.js** (Map Integration)
+- **Font Awesome** (Icons)
 
 ### Backend
+- **Node.js & Express.js**
+- **MongoDB Atlas** (Cloud Database for persistent storage)
+- **Nodemailer** (Email Verification System)
 
-- Node.js
-- Express.js
-
-### Database
-
-- Firebase Firestore
-
-### Authentication
-
-- Firebase Authentication
-
-### Maps and Location Services
-
-- Google Maps API
-- Google Places API
-- Browser Geolocation API
-
-### Deployment
-
-Frontend:
-- Vercel
-
-Backend:
-- Render
+### Maps & Location
+- **OpenStreetMap** (Map Tiles)
+- **Overpass API** (Emergency Resource Discovery)
+- **Browser Geolocation API**
 
 ---
 
@@ -85,153 +56,57 @@ Backend:
 
 ```plaintext
 Road-Safety-SOS/
-│
-├── client/
-│   │
-│   ├── public/
-│   ├── src/
-│   │   ├── components/
-│   │   ├── pages/
-│   │   ├── services/
-│   │   ├── hooks/
-│   │   ├── context/
-│   │   ├── assets/
-│   │   ├── App.jsx
-│   │   └── main.jsx
-│   │
-│   ├── package.json
-│   └── package-lock.json
-│
-├── server/
-│   │
-│   ├── routes/
-│   ├── controllers/
-│   ├── middleware/
-│   ├── models/
-│   ├── config/
-│   ├── services/
-│   ├── server.js
-│   │
-│   ├── package.json
-│   └── package-lock.json
-│
-├── docs/
-│
-├── README.md
-├── .gitignore
-└── package.json
+├── index.html        # Main entry point (Frontend UI)
+├── script.js         # Frontend logic, Map handling, SOS & Sync
+├── server.js         # Express backend & API endpoints (MongoDB & Nodemailer)
+├── sw.js             # Service Worker for offline PWA support
+├── package.json      # Node.js dependencies and scripts
+├── .gitignore        # Git ignore rules (node_modules, etc.)
+└── README.md         # Project documentation
 ```
 
 ---
 
-## Installation
+## Installation & Setup
 
-Clone the repository:
+1. **Clone the repository**:
+   ```bash
+   git clone https://github.com/your-username/Road-Safety-SOS.git
+   cd Road-Safety-SOS
+   ```
 
-```bash
-git clone https://github.com/your-username/Road-Safety-SOS.git
-```
+2. **Install Dependencies**:
+   ```bash
+   npm install
+   ```
 
-Move into the project directory:
+3. **Environment Configuration**:
+   The application uses MongoDB Atlas and Gmail for notifications. Ensure your `server.js` is configured with:
+   - `MONGO_URI`
+   - `SUPPORT_EMAIL`
+   - `APP_PASSWORD`
 
-```bash
-cd Road-Safety-SOS
-```
-
----
-
-## Install Frontend Dependencies
-
-```bash
-cd client
-npm install
-```
-
----
-
-## Install Backend Dependencies
-
-```bash
-cd ../server
-npm install
-```
-
----
-
-## Environment Variables
-
-Create a `.env` file inside the `server` folder:
-
-```env
-PORT=5000
-
-FIREBASE_API_KEY=your_key
-FIREBASE_PROJECT_ID=your_project_id
-
-GOOGLE_MAPS_API_KEY=your_key
-```
-
----
-
-## Run the Project
-
-Start backend server:
-
-```bash
-cd server
-npm run dev
-```
-
-Start frontend:
-
-```bash
-cd client
-npm run dev
-```
+4. **Run the Application**:
+   ```bash
+   npm run dev
+   ```
+   The server will start at `http://localhost:3000`.
 
 ---
 
 ## API Endpoints
 
-### Get Nearby Services
+### Statistics
+- `GET /api/stats` - Returns counts of verified users, organizations, and resolved alerts.
 
-```http
-GET /api/services/nearby
-```
+### Authentication
+- `POST /api/register` - Register a new User or Organization (triggers verification email).
+- `GET /api/verify/:token` - Verify email address.
+- `POST /api/login` - Authenticate verified users.
 
-Example:
-
-```http
-/api/services/nearby?lat=28.6139&lng=77.2090&type=hospital
-```
-
----
-
-### Trigger SOS
-
-```http
-POST /api/sos
-```
-
-Request body:
-
-```json
-{
-  "userId": "123",
-  "location": {
-    "lat": 28.6139,
-    "lng": 77.2090
-  }
-}
-```
-
----
-
-### Save Emergency Contacts
-
-```http
-POST /api/user/emergency-contacts
-```
+### Emergency Alerts
+- `POST /api/sos` - Trigger a new SOS alert with location data.
+- `GET /api/alerts` - Fetch all active SOS alerts (used by the Organization dashboard).
 
 ---
 
@@ -239,37 +114,23 @@ POST /api/user/emergency-contacts
 
 | Member | Responsibility |
 |----------|--------------|
-| Vinayak | Team Lead, Frontend Architecture, UI Integration |
-| Dhruv | Maps Integration, Location Services |
-| Krish | Backend APIs, Database, Authentication |
-| Sarthak | SOS Workflow, Offline Functionality |
-| Om | Testing, Documentation, Innovation Features |
+| Vinayak | Team Lead, UI/UX Design & Architecture |
+| Dhruv | Maps Integration & Geolocation Services |
+| Krish | Backend API Development & Data Persistence |
+| Sarthak | SOS Workflow & Offline Synchronization Logic |
+| Om | Testing, Documentation & Feature Innovation |
 
 ---
 
 ## Future Scope
-
-- AI-based Emergency Assistance
-- Real-Time Ambulance Tracking
-- Voice-Controlled SOS
-- Hospital Bed Availability
-- Accident Detection System
-- Cross-Country Emergency Integration
-
----
-
-## Evaluation Criteria Covered
-
-- Reliability and Data Accuracy
-- Number of Contacts Fetched
-- Offline Functionality
-- Innovation and Additional Features
-- Information Integration Across Countries
+- **Secure Auth**: Implementation of JWT and Bcrypt hashing.
+- **Real-time Notifications**: WebSockets (Socket.io) for instant SOS alerts.
+- **Accident Detection**: Integration with mobile accelerometers.
+- **Voice SOS**: Voice-controlled emergency triggers.
 
 ---
 
 ## Contributors
-
 - Vinayak
 - Dhruv
 - Krish
@@ -279,5 +140,4 @@ POST /api/user/emergency-contacts
 ---
 
 ## License
-
 This project is developed for educational and hackathon purposes.

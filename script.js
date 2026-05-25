@@ -1,7 +1,11 @@
 let map, userMarker, orgMap, orgMarkers = [];
 let userLocation = null;
 let currentUser = null;
-const API_BASE = 'http://localhost:3000/api';
+
+// Determine API Base URL based on environment
+const API_BASE = window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1'
+    ? 'http://localhost:3000/api'
+    : 'https://road-safety-sos.onrender.com/api';
 
 // Persistence Keys
 const SOS_QUEUE_KEY = 'road_safety_sos_queue';
@@ -64,10 +68,8 @@ async function updateGlobalStats() {
             updateText('stat-sos-count', data.alertCount);
 
             // Navbar stats
-            updateText('stat-users', data.userCount + data.orgCount);
+            updateText('stat-users', (data.userCount || 0) + (data.orgCount || 0));
 
-            // Dashboard stats
-            updateText('org-user-count', data.userCount);
             const activeAlertCount = document.getElementById('active-alert-count');
             if (activeAlertCount && currentUser?.role === 'org') {
                 activeAlertCount.innerText = `${data.alertCount} ACTIVE SOS`;
@@ -110,7 +112,6 @@ function showSection(sectionId) {
         refreshOrgDashboard();
     }
 
-    // Always refresh stats when showing home
     if (sectionId === 'home-section') {
         updateGlobalStats();
     }
@@ -146,7 +147,7 @@ async function handleRegister() {
         });
         const data = await response.json();
         if (response.ok) {
-            alert('Registration successful! Please login.');
+            alert(data.message || 'Registration successful! Check your email to verify.');
             showAuth('login');
             updateGlobalStats();
         } else alert(data.message);
@@ -172,7 +173,9 @@ async function handleLogin() {
             localStorage.setItem('cached_user', JSON.stringify(currentUser));
             showSection(role === 'user' ? 'user-dashboard' : 'org-dashboard');
             updateGlobalStats();
-        } else alert(data.message);
+        } else {
+            alert(data.message);
+        }
     } catch (err) {
         const cachedUser = JSON.parse(localStorage.getItem('cached_user'));
         if (cachedUser && cachedUser.email === email && cachedUser.role === role) {
@@ -203,13 +206,15 @@ function requestLocation() {
     if (navigator.geolocation) {
         navigator.geolocation.getCurrentPosition(position => {
             userLocation = { lat: position.coords.latitude, lng: position.coords.longitude };
-            document.getElementById('location-status').innerText = `Live: ${userLocation.lat.toFixed(4)}, ${userLocation.lng.toFixed(4)}`;
+            const statusEl = document.getElementById('location-status');
+            if (statusEl) statusEl.innerText = `Live: ${userLocation.lat.toFixed(4)}, ${userLocation.lng.toFixed(4)}`;
             map.setView([userLocation.lat, userLocation.lng], 15);
             if (userMarker) map.removeLayer(userMarker);
             userMarker = L.marker([userLocation.lat, userLocation.lng]).addTo(map).bindPopup('You are here').openPopup();
             updateMap();
         }, () => {
-            document.getElementById('location-status').innerText = 'Location access denied.';
+            const statusEl = document.getElementById('location-status');
+            if (statusEl) statusEl.innerText = 'Location access denied.';
         }, { enableHighAccuracy: true });
     }
 }
@@ -232,16 +237,17 @@ async function updateMap() {
 
     let totalContacts = 0;
     for (const cat of categories) {
-        if (document.getElementById(cat.id).checked) {
+        const checkbox = document.getElementById(cat.id);
+        if (checkbox && checkbox.checked) {
             const count = await fetchResources(cat);
             totalContacts += count;
         }
     }
-    document.getElementById('stat-contacts').innerText = totalContacts;
+    const contactsEl = document.getElementById('stat-contacts');
+    if (contactsEl) contactsEl.innerText = totalContacts;
 }
 
 async function fetchResources(cat) {
-    // [out:json];(query);out center;
     const url = `https://overpass-api.de/api/interpreter?data=${encodeURIComponent('[out:json][timeout:25];(' + cat.query + ');out center;')}`;
 
     try {
