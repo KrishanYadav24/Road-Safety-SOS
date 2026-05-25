@@ -1,6 +1,6 @@
-# Road Safety 2.0 (ROADSOS)
+# RoadSafetySoS
 
-Road Safety 2.0 is a real-time emergency response web application designed to help users quickly identify and contact nearby emergency services during road accidents. The platform reduces response time during the critical "golden hour" by providing fast access to emergency services and a robust SOS system that works even in low-connectivity areas.
+RoadSafetySoS is a real-time emergency response web application designed to help users quickly identify and contact nearby emergency services during road accidents. The platform reduces response time during the critical "golden hour" by providing fast access to emergency services and a robust SOS system that works even in low-connectivity areas.
 
 ---
 
@@ -55,7 +55,7 @@ Road Safety 2.0 is a real-time emergency response web application designed to he
 ## Project Structure
 
 ```plaintext
-Road-Safety-SOS/
+RoadSafetySoS/
 ├── index.html        # Main entry point (Frontend UI)
 ├── script.js         # Frontend logic, Map handling, SOS & Sync
 ├── server.js         # Express backend & API endpoints (MongoDB & Nodemailer)
@@ -71,8 +71,8 @@ Road-Safety-SOS/
 
 1. **Clone the repository**:
    ```bash
-   git clone https://github.com/your-username/Road-Safety-SOS.git
-   cd Road-Safety-SOS
+   git clone https://github.com/your-username/RoadSafetySoS.git
+   cd RoadSafetySoS
    ```
 
 2. **Install Dependencies**:

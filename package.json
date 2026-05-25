@@ -1,7 +1,7 @@
 {
-  "name": "road-safety-backend",
+  "name": "road-safety-sos",
   "version": "1.0.0",
-  "description": "Backend for Road Safety 2.0",
+  "description": "Backend for RoadSafetySoS",
   "main": "server.js",
   "scripts": {
     "start": "node server.js",

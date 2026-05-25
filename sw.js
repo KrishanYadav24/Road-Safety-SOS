@@ -1,4 +1,4 @@
-const CACHE_NAME = 'road-safety-v1';
+const CACHE_NAME = 'roadsafetysos-v1';
 const ASSETS = [
     '/',
     '/index.html',

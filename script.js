@@ -8,12 +8,139 @@ const API_BASE = window.location.hostname === 'localhost' || window.location.hos
     : 'https://road-safety-sos.onrender.com/api';
 
 // Persistence Keys
-const SOS_QUEUE_KEY = 'road_safety_sos_queue';
-const CACHE_RESOURCES_KEY = 'road_safety_resource_cache';
+const SOS_QUEUE_KEY = 'roadsafetysos_sos_queue';
+const CACHE_RESOURCES_KEY = 'roadsafetysos_resource_cache';
 
 // Load cached data on startup
 let sosQueue = JSON.parse(localStorage.getItem(SOS_QUEUE_KEY)) || [];
 let resourceCache = JSON.parse(localStorage.getItem(CACHE_RESOURCES_KEY)) || {};
+
+// --- Custom Modal Logic ---
+let modalCallback = null;
+
+function showAlert(title, message, type = 'info', callback = null) {
+    const modal = document.getElementById('custom-modal');
+    const titleEl = document.getElementById('modal-title');
+    const msgEl = document.getElementById('modal-message');
+    const iconContainer = document.getElementById('modal-icon');
+    const btn = document.getElementById('modal-btn');
+
+    modalCallback = callback;
+    titleEl.innerText = title;
+    msgEl.innerHTML = message;
+
+    iconContainer.className = "w-20 h-20 rounded-full flex items-center justify-center mx-auto mb-6 ";
+
+    if (type === 'success') {
+        iconContainer.classList.add('bg-emerald-100', 'text-emerald-600');
+        iconContainer.innerHTML = '<i class="fas fa-check-circle text-4xl"></i>';
+    } else if (type === 'error') {
+        iconContainer.classList.add('bg-red-100', 'text-red-600');
+        iconContainer.innerHTML = '<i class="fas fa-exclamation-circle text-4xl"></i>';
+    } else if (type === 'warning') {
+        iconContainer.classList.add('bg-amber-100', 'text-amber-600');
+        iconContainer.innerHTML = '<i class="fas fa-triangle-exclamation text-4xl"></i>';
+    } else {
+        iconContainer.classList.add('bg-blue-100', 'text-blue-600');
+        iconContainer.innerHTML = '<i class="fas fa-info-circle text-4xl"></i>';
+    }
+
+    modal.classList.remove('hidden');
+    setTimeout(() => modal.classList.add('modal-active'), 10);
+}
+
+function closeModal() {
+    const modal = document.getElementById('custom-modal');
+    modal.classList.remove('modal-active');
+    setTimeout(() => {
+        modal.classList.add('hidden');
+        if (modalCallback) {
+            modalCallback();
+            modalCallback = null;
+        }
+    }, 200);
+}
+
+// --- Navigation & Transitions ---
+function showSection(sectionId) {
+    const content = document.getElementById('main-content');
+
+    // Start transition
+    content.classList.add('blur-out');
+
+    setTimeout(() => {
+        ['home-section', 'user-dashboard', 'org-dashboard'].forEach(id => {
+            const element = document.getElementById(id);
+            if (element) element.classList.add('hidden');
+        });
+
+        const target = document.getElementById(sectionId);
+        if (target) target.classList.remove('hidden');
+
+        if (currentUser) {
+            document.getElementById('logout-btn')?.classList.remove('hidden');
+            document.getElementById('user-info')?.classList.remove('hidden');
+            document.getElementById('user-display-name').innerText = currentUser.name;
+        } else {
+            document.getElementById('logout-btn')?.classList.add('hidden');
+            document.getElementById('user-info')?.classList.add('hidden');
+        }
+
+        if (sectionId === 'user-dashboard') {
+            initUserMap();
+            requestLocation();
+        } else if (sectionId === 'org-dashboard') {
+            initOrgMap();
+            refreshOrgDashboard();
+        }
+
+        if (sectionId === 'home-section') {
+            updateGlobalStats();
+        }
+
+        updateOnlineStatus();
+
+        // End transition
+        content.classList.remove('blur-out');
+    }, 200); // Reduced delay for faster feel
+}
+
+function showAuth(view) {
+    if (view === 'login') {
+        document.getElementById('login-view').classList.remove('hidden');
+        document.getElementById('register-view').classList.add('hidden');
+    } else {
+        document.getElementById('login-view').classList.add('hidden');
+        document.getElementById('register-view').classList.remove('hidden');
+    }
+}
+
+// --- Team & Services ---
+function showTeamModal() {
+    showAlert('Team DigiX', `
+        <div class="text-left space-y-2">
+            <div class="flex items-center"><i class="fas fa-user-circle mr-3 text-blue-500"></i> Krishan Yadav</div>
+            <div class="flex items-center"><i class="fas fa-user-circle mr-3 text-blue-500"></i> Om Awasthi</div>
+            <div class="flex items-center"><i class="fas fa-user-circle mr-3 text-blue-500"></i> Sarthak Agrawal</div>
+            <div class="flex items-center"><i class="fas fa-user-circle mr-3 text-blue-500"></i> Dhruv Upadhayaya</div>
+            <div class="flex items-center"><i class="fas fa-user-circle mr-3 text-blue-500"></i> Vinayak Tripathi</div>
+        </div>
+    `, 'info');
+}
+
+function handleGetStarted() {
+    showAlert('Our Services', `
+        <ul class="text-left text-sm space-y-3">
+            <li><i class="fas fa-check text-green-500 mr-2"></i> <b>Real-time SOS:</b> Instant location broadcast to emergency responders.</li>
+            <li><i class="fas fa-check text-green-500 mr-2"></i> <b>Service Locator:</b> Find verified hospitals and police stations nearby.</li>
+            <li><i class="fas fa-check text-green-500 mr-2"></i> <b>Offline Mode:</b> SOS queuing even without active internet.</li>
+            <li><i class="fas fa-check text-green-500 mr-2"></i> <b>Verification:</b> Secure accounts for individuals and organizations.</li>
+        </ul>
+    `, 'info', () => {
+        showAuth('register');
+        document.getElementById('auth-container').scrollIntoView();
+    });
+}
 
 // --- Service Worker Registration ---
 if ('serviceWorker' in navigator) {
@@ -61,15 +188,10 @@ async function updateGlobalStats() {
         const response = await fetch(`${API_BASE}/stats`);
         if (response.ok) {
             const data = await response.json();
-
-            // Home page stats
             updateText('stat-user-count', data.userCount);
             updateText('stat-org-count', data.orgCount);
             updateText('stat-sos-count', data.alertCount);
-
-            // Navbar stats
             updateText('stat-users', (data.userCount || 0) + (data.orgCount || 0));
-
             const activeAlertCount = document.getElementById('active-alert-count');
             if (activeAlertCount && currentUser?.role === 'org') {
                 activeAlertCount.innerText = `${data.alertCount} ACTIVE SOS`;
@@ -85,50 +207,6 @@ function updateText(id, text) {
     if (el) el.innerText = text;
 }
 
-// --- Navigation ---
-function showSection(sectionId) {
-    ['home-section', 'user-dashboard', 'org-dashboard'].forEach(id => {
-        const element = document.getElementById(id);
-        if (element) element.classList.add('hidden');
-    });
-
-    const target = document.getElementById(sectionId);
-    if (target) target.classList.remove('hidden');
-
-    if (currentUser) {
-        document.getElementById('logout-btn')?.classList.remove('hidden');
-        document.getElementById('user-info')?.classList.remove('hidden');
-        document.getElementById('user-display-name').innerText = currentUser.name;
-    } else {
-        document.getElementById('logout-btn')?.classList.add('hidden');
-        document.getElementById('user-info')?.classList.add('hidden');
-    }
-
-    if (sectionId === 'user-dashboard') {
-        initUserMap();
-        requestLocation();
-    } else if (sectionId === 'org-dashboard') {
-        initOrgMap();
-        refreshOrgDashboard();
-    }
-
-    if (sectionId === 'home-section') {
-        updateGlobalStats();
-    }
-
-    updateOnlineStatus();
-}
-
-function showAuth(view) {
-    if (view === 'login') {
-        document.getElementById('login-view').classList.remove('hidden');
-        document.getElementById('register-view').classList.add('hidden');
-    } else {
-        document.getElementById('login-view').classList.add('hidden');
-        document.getElementById('register-view').classList.remove('hidden');
-    }
-}
-
 // --- Auth ---
 async function handleRegister() {
     const name = document.getElementById('reg-name').value;
@@ -137,7 +215,7 @@ async function handleRegister() {
     const password = document.getElementById('reg-password').value;
     const role = document.getElementById('reg-role').value;
 
-    if (!name || !email || !password || !phone) return alert('Please fill all fields');
+    if (!name || !email || !password || !phone) return showAlert('Missing Info', 'Please fill all fields to create your account.', 'warning');
 
     try {
         const response = await fetch(`${API_BASE}/register`, {
@@ -147,12 +225,14 @@ async function handleRegister() {
         });
         const data = await response.json();
         if (response.ok) {
-            alert(data.message || 'Registration successful! Check your email to verify.');
+            showAlert('Success!', data.message || 'Registration successful! Check your email to verify.', 'success');
             showAuth('login');
             updateGlobalStats();
-        } else alert(data.message);
+        } else {
+            showAlert('Registration Failed', data.message, 'error');
+        }
     } catch (err) {
-        alert('Network error. Registration requires a connection.');
+        showAlert('Connection Error', 'Registration requires an active internet connection.', 'error');
     }
 }
 
@@ -174,16 +254,16 @@ async function handleLogin() {
             showSection(role === 'user' ? 'user-dashboard' : 'org-dashboard');
             updateGlobalStats();
         } else {
-            alert(data.message);
+            showAlert('Login Failed', data.message, 'error');
         }
     } catch (err) {
         const cachedUser = JSON.parse(localStorage.getItem('cached_user'));
         if (cachedUser && cachedUser.email === email && cachedUser.role === role) {
             currentUser = cachedUser;
-            alert('Offline Login: Accessing cached dashboard.');
+            showAlert('Offline Access', 'Accessing your dashboard using cached credentials.', 'info');
             showSection(role === 'user' ? 'user-dashboard' : 'org-dashboard');
         } else {
-            alert('Connection required for first-time login.');
+            showAlert('Connection Required', 'An internet connection is required for first-time login.', 'warning');
         }
     }
 }
@@ -194,7 +274,7 @@ function logout() {
     showSection('home-section');
 }
 
-// --- User Map Logic ---
+// --- Map Logic ---
 function initUserMap() {
     if (map) return;
     map = L.map('map', { zoomControl: false }).setView([26.8467, 80.9462], 13);
@@ -249,14 +329,11 @@ async function updateMap() {
 
 async function fetchResources(cat) {
     const url = `https://overpass-api.de/api/interpreter?data=${encodeURIComponent('[out:json][timeout:25];(' + cat.query + ');out center;')}`;
-
     try {
         const response = await fetch(url);
         const data = await response.json();
-
         resourceCache[cat.type] = data.elements;
         localStorage.setItem(CACHE_RESOURCES_KEY, JSON.stringify(resourceCache));
-
         data.elements.forEach(el => renderMarker(el, cat));
         return data.elements.length;
     } catch (e) {
@@ -285,21 +362,43 @@ function renderMarker(el, cat) {
 
 // --- SOS Logic ---
 async function triggerSOS() {
-    if (!userLocation || !currentUser) return alert('Location and Login required');
+    if (!userLocation || !currentUser) return showAlert('Missing Info', 'Location access and active login are required to trigger a full SOS alert.', 'warning');
 
     const alertData = {
         id: Date.now(), userName: currentUser.name, userPhone: currentUser.phone,
         lat: userLocation.lat, lng: userLocation.lng,
-        time: new Date().toLocaleTimeString(), date: new Date().toLocaleDateString()
+        time: new Date().toLocaleTimeString(), date: new Date().toLocaleDateString(),
+        type: 'login'
     };
 
+    handleSOSSend(alertData);
+}
+
+async function triggerEmergencySOS() {
+    if (!navigator.geolocation) return showAlert('Error', 'Geolocation is not supported by your browser.', 'error');
+
+    showAlert('Broadcasting...', 'Fetching your precise location for emergency services...', 'info');
+
+    navigator.geolocation.getCurrentPosition(position => {
+        const alertData = {
+            id: Date.now(), userName: 'Emergency User', userPhone: 'N/A',
+            lat: position.coords.latitude, lng: position.coords.longitude,
+            time: new Date().toLocaleTimeString(), date: new Date().toLocaleDateString(),
+            type: 'emergency'
+        };
+        handleSOSSend(alertData);
+    }, () => {
+        showAlert('Location Denied', 'Please enable location access to use Emergency SOS.', 'error');
+    }, { enableHighAccuracy: true });
+}
+
+function handleSOSSend(alertData) {
     if (navigator.onLine) {
         sendSOS(alertData);
     } else {
         sosQueue.push(alertData);
         localStorage.setItem(SOS_QUEUE_KEY, JSON.stringify(sosQueue));
-        alert('Low/No Network Detected. SOS has been queued and will send automatically when network returns.');
-        visualSOSFeedback(true);
+        showAlert('Network Issue', 'No network detected. Your SOS has been queued and will be sent automatically when connectivity is restored.', 'info');
     }
 }
 
@@ -311,8 +410,12 @@ async function sendSOS(data) {
             body: JSON.stringify(data)
         });
         if (response.ok) {
-            visualSOSFeedback(false);
+            showAlert('SOS Broadcasted', 'Your emergency alert has been sent to responders.', 'success');
             updateGlobalStats();
+
+            if ('Notification' in window && Notification.permission === 'granted') {
+                new Notification('RoadSafetySoS', { body: 'SOS Broadcasted Successfully!', icon: '/logo.png' });
+            }
         } else throw new Error();
     } catch (e) {
         if (!sosQueue.find(q => q.id === data.id)) {
@@ -327,22 +430,9 @@ async function processSOSQueue() {
     const queue = [...sosQueue];
     sosQueue = [];
     localStorage.setItem(SOS_QUEUE_KEY, JSON.stringify([]));
-
     for (const alert of queue) {
         await sendSOS(alert);
     }
-}
-
-function visualSOSFeedback(isQueued) {
-    const btn = document.querySelector('#user-dashboard button[onclick="triggerSOS()"]');
-    if (!btn) return;
-    const original = btn.innerHTML;
-    btn.innerHTML = `<div class="flex flex-col items-center"><i class="fas ${isQueued ? 'fa-clock animate-pulse' : 'fa-check-circle'} mb-2"></i><span>${isQueued ? 'QUEUED' : 'SENT'}</span></div>`;
-    btn.classList.replace('bg-red-600', 'bg-orange-500');
-    setTimeout(() => {
-        btn.innerHTML = original;
-        btn.classList.replace('bg-orange-500', 'bg-red-600');
-    }, 4000);
 }
 
 // --- Org Dashboard ---
@@ -352,6 +442,7 @@ function initOrgMap() {
     L.tileLayer('https://{s}.tile.osm.org/{z}/{x}/{y}.png').addTo(orgMap);
 }
 
+let lastAlertCount = 0;
 async function refreshOrgDashboard() {
     try {
         const response = await fetch(`${API_BASE}/alerts`);
@@ -363,34 +454,93 @@ async function refreshOrgDashboard() {
         if (list) list.innerHTML = '';
         if (count) count.innerText = `${alerts.length} ACTIVE SOS`;
 
+        if (alerts.length > lastAlertCount) {
+            if ('Notification' in window && Notification.permission === 'granted') {
+                new Notification('New SOS Alert!', { body: `A new ${alerts[0].type} SOS has been reported.`, icon: '/logo.png' });
+            }
+        }
+        lastAlertCount = alerts.length;
+
         orgMarkers.forEach(m => orgMap.removeLayer(m));
         orgMarkers = [];
 
         alerts.forEach(alert => {
+            const isLogin = alert.type === 'login';
             const div = document.createElement('div');
-            div.className = 'p-5 bg-white border border-slate-100 shadow-sm rounded-2xl hover:border-blue-300 transition-all cursor-pointer mb-2';
-            div.innerHTML = `<div class="font-bold text-slate-800">${alert.userName}</div><div class="text-xs font-bold text-blue-600 mb-1">${alert.userPhone}</div><div class="text-[10px] text-slate-400 font-bold uppercase tracking-widest">${alert.time} | ${alert.date}</div>`;
-            div.onclick = () => orgMap.setView([alert.lat, alert.lng], 16);
+            div.className = `p-5 bg-white border ${isLogin ? 'border-blue-100' : 'border-red-100'} shadow-sm rounded-2xl hover:border-blue-300 transition-all mb-2`;
+
+            let actionButtons = `
+                <div class="flex gap-2 mt-4">
+                    <a href="https://www.google.com/maps/dir/?api=1&destination=${alert.lat},${alert.lng}" target="_blank" class="flex-1 bg-slate-900 text-white text-center py-2 rounded-xl text-xs font-bold hover:bg-black transition-all">
+                        <i class="fas fa-route mr-1"></i> Directions
+                    </a>
+            `;
+
+            if (isLogin && alert.userPhone !== 'N/A') {
+                actionButtons += `
+                    <a href="tel:${alert.userPhone}" class="flex-1 bg-blue-600 text-white text-center py-2 rounded-xl text-xs font-bold hover:bg-blue-700 transition-all">
+                        <i class="fas fa-phone-alt mr-1"></i> Call
+                    </a>
+                `;
+            }
+
+            actionButtons += `</div>`;
+
+            div.innerHTML = `
+                <div class="flex justify-between items-start mb-2">
+                    <div>
+                        <div class="font-bold text-slate-800">${alert.userName}</div>
+                        <div class="text-[10px] font-bold text-blue-600 uppercase tracking-widest">${alert.type} SOS</div>
+                    </div>
+                    <div class="text-[10px] text-slate-400 font-bold text-right">${alert.time}<br>${alert.date}</div>
+                </div>
+                <div class="text-[10px] text-slate-500 font-medium">Coords: ${alert.lat.toFixed(4)}, ${alert.lng.toFixed(4)}</div>
+                ${actionButtons}
+            `;
+
+            div.onclick = (e) => {
+                if (e.target.tagName !== 'A' && e.target.parentElement.tagName !== 'A') {
+                    orgMap.setView([alert.lat, alert.lng], 16);
+                }
+            };
             list.appendChild(div);
 
-            const marker = L.marker([alert.lat, alert.lng]).addTo(orgMap).bindPopup(`<b>${alert.userName}</b><br>${alert.userPhone}`);
+            const marker = L.marker([alert.lat, alert.lng]).addTo(orgMap).bindPopup(`<b>${alert.userName}</b><br>${alert.type} SOS`);
             orgMarkers.push(marker);
         });
     } catch (e) { console.warn("Failed to sync Org dashboard (Offline)"); }
 }
 
-// Global polling for stats
-setInterval(updateGlobalStats, 15000);
-
-// Detect existing session
+// Detect existing session & Init
 window.onload = () => {
+    const loader = document.getElementById('loading-screen');
+    const content = document.getElementById('main-content');
+
+    // Hide loading screen immediately after DOM setup
+    const hideLoader = () => {
+        if (loader) {
+            loader.style.opacity = '0';
+            loader.style.visibility = 'hidden';
+        }
+    };
+
     updateGlobalStats();
+
+    if ('Notification' in window) {
+        Notification.requestPermission();
+    }
+
     const cachedUser = JSON.parse(localStorage.getItem('cached_user'));
     if (cachedUser) {
         currentUser = cachedUser;
         showSection(currentUser.role === 'user' ? 'user-dashboard' : 'org-dashboard');
     } else {
-        showSection('home-section');
+        content.classList.remove('blur-out');
+        document.getElementById('home-section').classList.remove('hidden');
     }
+
     updateOnlineStatus();
+
+    // Auto-hide loader after a tiny delay for smooth feel
+    setTimeout(hideLoader, 150);
 };

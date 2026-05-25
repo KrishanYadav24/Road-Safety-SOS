@@ -52,12 +52,13 @@ const userSchema = new mongoose.Schema({
 
 const alertSchema = new mongoose.Schema({
     id: { type: Number, required: true, unique: true },
-    userName: String,
-    userPhone: String,
+    userName: { type: String, default: 'Emergency User' },
+    userPhone: { type: String, default: 'N/A' },
     lat: Number,
     lng: Number,
     time: String,
     date: String,
+    type: { type: String, enum: ['login', 'emergency'], default: 'login' },
     createdAt: { type: Date, default: Date.now }
 });
 
@@ -90,29 +91,23 @@ app.post('/api/register', async (req, res) => {
 
         await newUser.save();
 
-        // Use the production URL for the verification link
-        // This ensures the link works even when testing from localhost
         const productionUrl = "https://road-safety-sos.onrender.com";
         const verificationLink = `${productionUrl}/api/verify/${verificationToken}`;
 
         const mailOptions = {
-            from: `"Road Safety 2.0 Support" <${SUPPORT_EMAIL}>`,
+            from: `"RoadSafetySoS Support" <${SUPPORT_EMAIL}>`,
             to: email,
-            subject: 'Complete Your Registration - Road Safety 2.0',
+            subject: 'Complete Your Registration - RoadSafetySoS',
             html: `
                 <div style="font-family: 'Segoe UI', Roboto, Helvetica, Arial, sans-serif; background-color: #f4f7fa; padding: 40px 0;">
                     <div style="max-width: 600px; margin: 0 auto; background-color: #ffffff; border-radius: 16px; overflow: hidden; box-shadow: 0 4px 12px rgba(0,0,0,0.05);">
-                        <!-- Header -->
                         <div style="background: linear-gradient(135deg, #2563eb 0%, #1e40af 100%); padding: 30px; text-align: center;">
-                            <h1 style="color: #ffffff; margin: 0; font-size: 28px; letter-spacing: -0.5px;">RoadSafety <span style="font-weight: 300; opacity: 0.9;">2.0</span></h1>
+                            <h1 style="color: #ffffff; margin: 0; font-size: 28px; letter-spacing: -0.5px;">RoadSafetySoS</h1>
                             <p style="color: #bfdbfe; margin-top: 5px; font-size: 14px;">Your Shield on the Road</p>
                         </div>
-
-                        <!-- Content -->
                         <div style="padding: 40px; color: #334155;">
                             <h2 style="color: #1e293b; font-size: 22px; margin-top: 0;">Welcome to the Network, ${name}!</h2>
-                            <p style="line-height: 1.6; font-size: 16px;">Thank you for joining Road Safety 2.0. You've taken a vital step toward personal safety and community assistance. Our mission is to eliminate delays during the <b>"Golden Hour"</b> by connecting you instantly with emergency services.</p>
-
+                            <p style="line-height: 1.6; font-size: 16px;">Thank you for joining RoadSafetySoS. You've taken a vital step toward personal safety and community assistance. Our mission is to eliminate delays during the <b>"Golden Hour"</b> by connecting you instantly with emergency services.</p>
                             <div style="background-color: #f8fafc; border-radius: 12px; padding: 20px; margin: 25px 0; border: 1px solid #e2e8f0;">
                                 <h3 style="margin-top: 0; font-size: 16px; color: #2563eb;">What you can do now:</h3>
                                 <ul style="padding-left: 20px; margin-bottom: 0; line-height: 1.5; font-size: 14px;">
@@ -121,22 +116,17 @@ app.post('/api/register', async (req, res) => {
                                     <li><b>Offline Sync:</b> Safety that works even without internet.</li>
                                 </ul>
                             </div>
-
                             <p style="text-align: center; margin-bottom: 30px; font-size: 16px;">Please click the button below to verify your email and activate your safety dashboard:</p>
-
                             <div style="text-align: center;">
-                                <a href="${verificationLink}" style="display: inline-block; padding: 16px 36px; background-color: #2563eb; color: #ffffff; text-decoration: none; border-radius: 12px; font-weight: 700; font-size: 16px; transition: background-color 0.3s ease;">Verify My Account</a>
+                                <a href="${verificationLink}" style="display: inline-block; padding: 16px 36px; background-color: #2563eb; color: #ffffff; text-decoration: none; border-radius: 12px; font-weight: 700; font-size: 16px;">Verify My Account</a>
                             </div>
-
                             <p style="color: #64748b; font-size: 13px; text-align: center; margin-top: 40px;">
                                 If you did not create an account, please ignore this email.<br><br>
                                 <span style="font-size: 11px;">Verification Link: <a href="${verificationLink}" style="color: #2563eb; text-decoration: none;">${verificationLink}</a></span>
                             </p>
                         </div>
-
-                        <!-- Footer -->
                         <div style="background-color: #f1f5f9; padding: 20px; text-align: center; color: #94a3b8; font-size: 12px;">
-                            <p>© 2024 Road Safety 2.0 Emergency Network. All rights reserved.</p>
+                            <p>© 2024 RoadSafetySoS Emergency Network. All rights reserved.</p>
                         </div>
                     </div>
                 </div>
@@ -146,54 +136,41 @@ app.post('/api/register', async (req, res) => {
         transporter.sendMail(mailOptions, (error, info) => {
             if (error) {
                 console.error("Email Error:", error);
-                return res.json({ message: 'Registration successful, but we couldn\'t send the verification email. Please contact support.' });
+                return res.json({ message: 'Registration successful, but we couldn\'t send the verification email.' });
             }
             res.json({ message: 'Registration successful! Check your email to verify your account.' });
         });
-
     } catch (err) {
-        console.error(err);
         res.status(500).json({ message: 'Internal server error' });
     }
 });
 
-// Verification Endpoint
 app.get('/api/verify/:token', async (req, res) => {
     try {
         const { token } = req.params;
         const user = await User.findOne({ verificationToken: token });
-
-        if (!user) return res.status(400).send('<div style="font-family: sans-serif; text-align: center; padding: 50px;"><h1>Invalid link</h1><p>This verification link is invalid or has already been used.</p></div>');
-
+        if (!user) return res.status(400).send('Invalid link');
         user.isVerified = true;
         user.verificationToken = undefined;
         await user.save();
-
         res.send(`
-            <div style="text-align: center; padding: 100px 20px; font-family: 'Segoe UI', sans-serif; background-color: #f8fafc; min-height: 100vh; display: flex; align-items: center; justify-content: center;">
-                <div style="background: white; padding: 40px; border-radius: 24px; box-shadow: 0 10px 15px -3px rgba(0,0,0,0.1); max-width: 400px;">
-                    <div style="color: #10b981; font-size: 60px; margin-bottom: 20px;">✓</div>
-                    <h1 style="color: #1e293b; margin-bottom: 10px;">Email Verified!</h1>
-                    <p style="color: #64748b; margin-bottom: 30px;">Your account is now active and ready to use.</p>
-                    <a href="https://roadsafetysos.vercel.app/" style="display: inline-block; background: #2563eb; color: white; padding: 12px 30px; border-radius: 12px; text-decoration: none; font-weight: bold;">Login Now</a>
-                </div>
+            <div style="text-align: center; padding: 100px 20px; font-family: sans-serif;">
+                <h1>Email Verified!</h1>
+                <p>Your account is now active.</p>
+                <a href="https://roadsafetysos.vercel.app/">Login Now</a>
             </div>
         `);
     } catch (err) {
-        res.status(500).send('Server Error during verification.');
+        res.status(500).send('Server Error');
     }
 });
 
-// Login check verification
 app.post('/api/login', async (req, res) => {
     try {
         const { email, password, role } = req.body;
         const user = await User.findOne({ email, password, role });
-
         if (user) {
-            if (!user.isVerified) {
-                return res.status(401).json({ message: 'Please verify your email before logging in. Check your inbox (and spam).' });
-            }
+            if (!user.isVerified) return res.status(401).json({ message: 'Verify your email first.' });
             const userObj = user.toObject();
             delete userObj.password;
             res.json({ user: userObj });
@@ -202,17 +179,6 @@ app.post('/api/login', async (req, res) => {
         }
     } catch (err) {
         res.status(500).json({ message: 'Internal server error' });
-    }
-});
-
-app.get('/api/stats', async (req, res) => {
-    try {
-        const userCount = await User.countDocuments({ role: 'user', isVerified: true });
-        const orgCount = await User.countDocuments({ role: 'org', isVerified: true });
-        const alertCount = await Alert.countDocuments();
-        res.json({ userCount, orgCount, alertCount });
-    } catch (err) {
-        res.status(500).json({ message: 'Error fetching stats' });
     }
 });
 
@@ -236,6 +202,17 @@ app.get('/api/alerts', async (req, res) => {
         res.json(alerts);
     } catch (err) {
         res.status(500).json({ message: 'Error fetching alerts' });
+    }
+});
+
+app.get('/api/stats', async (req, res) => {
+    try {
+        const userCount = await User.countDocuments({ role: 'user', isVerified: true });
+        const orgCount = await User.countDocuments({ role: 'org', isVerified: true });
+        const alertCount = await Alert.countDocuments();
+        res.json({ userCount, orgCount, alertCount });
+    } catch (err) {
+        res.status(500).json({ message: 'Error fetching stats' });
     }
 });
 
