@@ -116,7 +116,7 @@ RoadSafetySoS/
 |----------|--------------|
 | Vinayak | Team Lead, UI/UX Design & Architecture |
 | Dhruv | Maps Integration & Geolocation Services |
-| Krish | Backend API Development & Data Persistence |
+| Krishan | Backend API Development & Data Persistence |
 | Sarthak | SOS Workflow & Offline Synchronization Logic |
 | Om | Testing, Documentation & Feature Innovation |
 
@@ -133,7 +133,7 @@ RoadSafetySoS/
 ## Contributors
 - Vinayak
 - Dhruv
-- Krish
+- Krishan
 - Sarthak
 - Om
 
