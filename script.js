@@ -1,6 +1,7 @@
 let map, userMarker, orgMap, orgMarkers = [];
 let userLocation = null;
 let currentUser = null;
+let registeredOrgMarkers = [];
 
 // Determine API Base URL based on environment
 const API_BASE = window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1'
@@ -10,10 +11,12 @@ const API_BASE = window.location.hostname === 'localhost' || window.location.hos
 // Persistence Keys
 const SOS_QUEUE_KEY = 'roadsafetysos_sos_queue';
 const CACHE_RESOURCES_KEY = 'roadsafetysos_resource_cache';
+const CACHE_ORGS_KEY = 'roadsafetysos_registered_org_cache';
 
 // Load cached data on startup
 let sosQueue = JSON.parse(localStorage.getItem(SOS_QUEUE_KEY)) || [];
 let resourceCache = JSON.parse(localStorage.getItem(CACHE_RESOURCES_KEY)) || {};
+let registeredOrgCache = JSON.parse(localStorage.getItem(CACHE_ORGS_KEY)) || [];
 
 // --- Custom Modal Logic ---
 let modalCallback = null;
@@ -115,6 +118,46 @@ function showAuth(view) {
     }
 }
 
+function setRegisterRole(role) {
+    const isOrg = role === 'org';
+    document.getElementById('reg-role').value = role;
+    document.getElementById('reg-name').placeholder = isOrg ? 'Organization Name' : 'Full Name';
+    document.getElementById('org-registration-fields').classList.toggle('hidden', !isOrg);
+
+    const userTab = document.getElementById('reg-user-tab');
+    const orgTab = document.getElementById('reg-org-tab');
+    userTab.className = isOrg
+        ? 'py-2.5 rounded-lg text-sm font-bold text-slate-500'
+        : 'py-2.5 rounded-lg text-sm font-bold bg-white text-blue-600 shadow-sm';
+    orgTab.className = isOrg
+        ? 'py-2.5 rounded-lg text-sm font-bold bg-white text-blue-600 shadow-sm'
+        : 'py-2.5 rounded-lg text-sm font-bold text-slate-500';
+}
+
+function captureOrgLocation() {
+    const statusEl = document.getElementById('reg-location-status');
+    if (!navigator.geolocation) {
+        statusEl.innerText = 'Geolocation is not supported by your browser.';
+        statusEl.className = 'text-xs font-bold text-red-500 text-center';
+        return;
+    }
+
+    statusEl.innerText = 'Fetching organization location...';
+    statusEl.className = 'text-xs font-bold text-blue-500 text-center';
+
+    navigator.geolocation.getCurrentPosition(position => {
+        const lat = position.coords.latitude;
+        const lng = position.coords.longitude;
+        document.getElementById('reg-lat').value = lat;
+        document.getElementById('reg-lng').value = lng;
+        statusEl.innerText = `Location captured: ${lat.toFixed(4)}, ${lng.toFixed(4)}`;
+        statusEl.className = 'text-xs font-bold text-emerald-600 text-center';
+    }, () => {
+        statusEl.innerText = 'Location permission is required for organization registration.';
+        statusEl.className = 'text-xs font-bold text-red-500 text-center';
+    }, { enableHighAccuracy: true });
+}
+
 // --- Team & Services ---
 function showTeamModal() {
     showAlert('Team DigiX', `
@@ -214,14 +257,21 @@ async function handleRegister() {
     const phone = document.getElementById('reg-phone').value;
     const password = document.getElementById('reg-password').value;
     const role = document.getElementById('reg-role').value;
+    const category = document.getElementById('reg-category')?.value;
+    const address = document.getElementById('reg-address')?.value;
+    const lat = parseFloat(document.getElementById('reg-lat')?.value);
+    const lng = parseFloat(document.getElementById('reg-lng')?.value);
 
     if (!name || !email || !password || !phone) return showAlert('Missing Info', 'Please fill all fields to create your account.', 'warning');
+    if (role === 'org' && (!category || !address || Number.isNaN(lat) || Number.isNaN(lng))) {
+        return showAlert('Organization Details Required', 'Please select a category, enter the organization address, and capture its location.', 'warning');
+    }
 
     try {
         const response = await fetch(`${API_BASE}/register`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ name, email, phone, password, role })
+            body: JSON.stringify({ name, email, phone, password, role, category, address, lat, lng })
         });
         const data = await response.json();
         if (response.ok) {
@@ -302,6 +352,7 @@ function requestLocation() {
 async function updateMap() {
     if (!userLocation) return;
     map.eachLayer(layer => { if (layer instanceof L.Marker && layer !== userMarker) map.removeLayer(layer); });
+    registeredOrgMarkers = [];
 
     const radius = document.getElementById('radius-select').value;
     const lat = userLocation.lat;
@@ -316,6 +367,7 @@ async function updateMap() {
     ];
 
     let totalContacts = 0;
+    totalContacts += await fetchRegisteredOrganizations(categories, radius, lat, lng);
     for (const cat of categories) {
         const checkbox = document.getElementById(cat.id);
         if (checkbox && checkbox.checked) {
@@ -325,6 +377,62 @@ async function updateMap() {
     }
     const contactsEl = document.getElementById('stat-contacts');
     if (contactsEl) contactsEl.innerText = totalContacts;
+}
+
+async function fetchRegisteredOrganizations(categories, radius, lat, lng) {
+    try {
+        const response = await fetch(`${API_BASE}/organizations`);
+        if (response.ok) {
+            registeredOrgCache = await response.json();
+            localStorage.setItem(CACHE_ORGS_KEY, JSON.stringify(registeredOrgCache));
+        }
+    } catch (e) {
+        console.warn('Using cached registered organizations');
+    }
+
+    let count = 0;
+    registeredOrgCache.forEach(org => {
+        const cat = categories.find(item => item.id === `check-${org.category}`);
+        const checkbox = cat && document.getElementById(cat.id);
+        if (!cat || !checkbox?.checked || !org.lat || !org.lng) return;
+
+        const distance = getDistanceMeters(lat, lng, org.lat, org.lng);
+        if (distance > Number(radius)) return;
+
+        renderRegisteredOrgMarker(org, cat, distance);
+        count += 1;
+    });
+    return count;
+}
+
+function getDistanceMeters(lat1, lng1, lat2, lng2) {
+    const toRad = value => value * Math.PI / 180;
+    const earthRadius = 6371000;
+    const dLat = toRad(lat2 - lat1);
+    const dLng = toRad(lng2 - lng1);
+    const a = Math.sin(dLat / 2) ** 2 +
+        Math.cos(toRad(lat1)) * Math.cos(toRad(lat2)) *
+        Math.sin(dLng / 2) ** 2;
+    return earthRadius * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+}
+
+function renderRegisteredOrgMarker(org, cat, distance) {
+    const markerIcon = L.divIcon({
+        className: 'custom-marker registered-org-marker',
+        html: `<div style="background-color:${cat.color}; color:white; width:36px; height:36px; border-radius:12px; display:flex; align-items:center; justify-content:center; border:3px solid white; box-shadow:0 4px 10px rgba(0,0,0,0.35)"><i class="fas ${cat.icon} text-sm"></i></div>`,
+        iconSize: [36, 36]
+    });
+
+    const phone = org.phone || 'No contact number available';
+    const marker = L.marker([org.lat, org.lng], { icon: markerIcon }).addTo(map)
+        .bindPopup(`
+            <b>${org.name}</b><br>
+            <span class="text-xs font-bold text-slate-500 uppercase">Registered ${cat.type}</span><br>
+            <span>${org.address || 'Address not available'}</span><br>
+            <span>${(distance / 1000).toFixed(1)} km away</span><br>
+            <a href="tel:${phone}" class="text-blue-600 font-bold underline">${phone}</a>
+        `);
+    registeredOrgMarkers.push(marker);
 }
 
 async function fetchResources(cat) {

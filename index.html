@@ -192,14 +192,32 @@
                     <h2 class="text-2xl md:text-3xl font-bold mb-2 text-slate-800">Create Account</h2>
                     <p class="text-sm md:text-base text-slate-500 mb-6 md:mb-8">Join the emergency network</p>
                     <div class="space-y-3 md:space-y-4">
-                        <input type="text" id="reg-name" placeholder="Full Name / Org Name" class="w-full p-3.5 bg-slate-50 border border-slate-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-blue-500 text-slate-600">
+                        <div class="grid grid-cols-2 gap-2 bg-slate-100 p-1 rounded-xl">
+                            <button type="button" id="reg-user-tab" onclick="setRegisterRole('user')" class="py-2.5 rounded-lg text-sm font-bold bg-white text-blue-600 shadow-sm">Individual</button>
+                            <button type="button" id="reg-org-tab" onclick="setRegisterRole('org')" class="py-2.5 rounded-lg text-sm font-bold text-slate-500">Organization</button>
+                        </div>
+                        <input type="hidden" id="reg-role" value="user">
+                        <input type="hidden" id="reg-lat">
+                        <input type="hidden" id="reg-lng">
+                        <input type="text" id="reg-name" placeholder="Full Name" class="w-full p-3.5 bg-slate-50 border border-slate-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-blue-500 text-slate-600">
                         <input type="email" id="reg-email" placeholder="Email Address" class="w-full p-3.5 bg-slate-50 border border-slate-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-blue-500 text-slate-600">
                         <input type="tel" id="reg-phone" placeholder="Mobile Number" class="w-full p-3.5 bg-slate-50 border border-slate-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-blue-500 text-slate-600">
                         <input type="password" id="reg-password" placeholder="Password" class="w-full p-3.5 bg-slate-50 border border-slate-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-blue-500 text-slate-600">
-                        <select id="reg-role" class="w-full p-3.5 bg-slate-50 border border-slate-200 rounded-xl font-medium text-slate-600">
-                            <option value="user">Individual User</option>
-                            <option value="org">Organization / Service Provider</option>
-                        </select>
+                        <div id="org-registration-fields" class="hidden space-y-3 md:space-y-4">
+                            <select id="reg-category" class="w-full p-3.5 bg-slate-50 border border-slate-200 rounded-xl font-medium text-slate-600">
+                                <option value="">Select Organization Category</option>
+                                <option value="hospital">Hospital</option>
+                                <option value="police">Police Station</option>
+                                <option value="trauma">Trauma Centre</option>
+                                <option value="towing">Repair / Towing Service</option>
+                                <option value="clinic">Clinic</option>
+                            </select>
+                            <input type="text" id="reg-address" placeholder="Organization Address / Area" class="w-full p-3.5 bg-slate-50 border border-slate-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-blue-500 text-slate-600">
+                            <button type="button" onclick="captureOrgLocation()" class="w-full bg-emerald-600 text-white py-3.5 rounded-xl font-bold hover:bg-emerald-700 transition-all">
+                                <i class="fas fa-location-crosshairs mr-2"></i>Use Current Location
+                            </button>
+                            <p id="reg-location-status" class="text-xs font-bold text-slate-400 text-center">Location is required for organization registration.</p>
+                        </div>
                         <button onclick="handleRegister()" class="w-full bg-slate-900 text-white py-3.5 md:py-4 rounded-xl font-bold text-base md:text-lg hover:bg-black transition-all">Register Now</button>
                         <p class="text-center text-sm text-slate-500 mt-6">Already have an account? <a href="javascript:void(0)" onclick="showAuth('login')" class="text-blue-600 font-bold">Sign In</a></p>
                     </div>

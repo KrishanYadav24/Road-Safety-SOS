@@ -46,6 +46,10 @@ const userSchema = new mongoose.Schema({
     phone: { type: String, required: true },
     password: { type: String, required: true },
     role: { type: String, enum: ['user', 'org'], default: 'user' },
+    category: { type: String, enum: ['hospital', 'police', 'trauma', 'towing', 'clinic'] },
+    address: String,
+    lat: Number,
+    lng: Number,
     isVerified: { type: Boolean, default: false },
     verificationToken: String
 });
@@ -76,15 +80,22 @@ app.use(express.static(__dirname));
 // Registration with Email Verification
 app.post('/api/register', async (req, res) => {
     try {
-        const { name, email, phone, password, role } = req.body;
+        const { name, email, phone, password, role, category, address, lat, lng } = req.body;
 
         const existingUser = await User.findOne({ email });
         if (existingUser) return res.status(400).json({ message: 'User already exists' });
+        if (role === 'org' && (!category || !address || typeof lat !== 'number' || typeof lng !== 'number')) {
+            return res.status(400).json({ message: 'Organization category, address, and location are required' });
+        }
 
         const verificationToken = crypto.randomBytes(32).toString('hex');
 
         const newUser = new User({
             name, email, phone, password, role,
+            category: role === 'org' ? category : undefined,
+            address: role === 'org' ? address : undefined,
+            lat: role === 'org' ? lat : undefined,
+            lng: role === 'org' ? lng : undefined,
             isVerified: false,
             verificationToken
         });
@@ -202,6 +213,20 @@ app.get('/api/alerts', async (req, res) => {
         res.json(alerts);
     } catch (err) {
         res.status(500).json({ message: 'Error fetching alerts' });
+    }
+});
+
+app.get('/api/organizations', async (req, res) => {
+    try {
+        const organizations = await User.find({
+            role: 'org',
+            isVerified: true,
+            lat: { $type: 'number' },
+            lng: { $type: 'number' }
+        }).select('name phone category address lat lng');
+        res.json(organizations);
+    } catch (err) {
+        res.status(500).json({ message: 'Error fetching organizations' });
     }
 });
 
