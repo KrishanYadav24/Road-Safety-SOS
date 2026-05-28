@@ -18,24 +18,29 @@ const JWT_SECRET = process.env.JWT_SECRET || 'roadsafetysos-dev-secret';
 
 /**
  * DATABASE CONNECTION
+ * Credentials are now read exclusively from environment variables
  */
-const MONGO_URI = process.env.MONGO_URI || "mongodb+srv://vinayak:RoadSoS%40123@roadsos.jbo7s55.mongodb.net/roadsos?retryWrites=true&w=majority";
+const MONGO_URI = process.env.MONGO_URI;
 
-mongoose.connect(MONGO_URI, {
-    serverSelectionTimeoutMS: 10000 // Increased timeout for cloud DB
-})
-.then(() => console.log('✅ Connected to MongoDB Atlas'))
-.catch(err => {
-    console.error('❌ MongoDB connection error:', err.message);
-});
+if (!MONGO_URI) {
+    console.error('❌ Error: MONGO_URI is not defined in environment variables.');
+} else {
+    mongoose.connect(MONGO_URI, {
+        serverSelectionTimeoutMS: 10000
+    })
+    .then(() => console.log('✅ Connected to MongoDB Atlas'))
+    .catch(err => {
+        console.error('❌ MongoDB connection error:', err.message);
+    });
+}
 
 /**
  * EMAIL CONFIGURATION
+ * Credentials are now read exclusively from environment variables
  */
-const SUPPORT_EMAIL = process.env.SUPPORT_EMAIL || 'roadsosdigix@gmail.com';
-const APP_PASSWORD = process.env.APP_PASSWORD || 'lbcf tejx bhef havn';
+const SUPPORT_EMAIL = process.env.SUPPORT_EMAIL;
+const APP_PASSWORD = process.env.APP_PASSWORD;
 
-// Switched to Port 587 (STARTTLS) to prevent connection timeouts on cloud hosting
 const transporter = nodemailer.createTransport({
     host: 'smtp.gmail.com',
     port: 587,
@@ -45,17 +50,21 @@ const transporter = nodemailer.createTransport({
         pass: APP_PASSWORD
     },
     tls: {
-        rejectUnauthorized: false // Helps with some hosting provider restrictions
+        rejectUnauthorized: false
     },
     connectionTimeout: 20000,
     greetingTimeout: 20000,
     socketTimeout: 20000
 });
 
-transporter.verify((error) => {
-    if (error) console.error("❌ Email transporter error:", error.message);
-    else console.log("✅ Email server is ready");
-});
+if (SUPPORT_EMAIL && APP_PASSWORD) {
+    transporter.verify((error) => {
+        if (error) console.error("❌ Email transporter error:", error.message);
+        else console.log("✅ Email server is ready");
+    });
+} else {
+    console.warn('⚠️ Warning: Email credentials missing in environment variables.');
+}
 
 /**
  * MONGODB SCHEMAS
@@ -157,10 +166,8 @@ app.post('/api/register', async (req, res) => {
 
         await newUser.save();
 
-        // Send response immediately to frontend
         res.json({ message: 'Registration successful! Check your email for verification.' });
 
-        // Handle email asynchronously so it doesn't block the response
         const protocol = req.headers['x-forwarded-proto'] || req.protocol;
         const host = req.get('host');
         const baseUrl = process.env.PRODUCTION_URL || `${protocol}://${host}`;
@@ -182,10 +189,12 @@ app.post('/api/register', async (req, res) => {
             `
         };
 
-        transporter.sendMail(mailOptions, (error, info) => {
-            if (error) console.error("❌ Email Error:", error.message);
-            else console.log("✅ Email sent: " + info.response);
-        });
+        if (SUPPORT_EMAIL && APP_PASSWORD) {
+            transporter.sendMail(mailOptions, (error, info) => {
+                if (error) console.error("❌ Email Error:", error.message);
+                else console.log("✅ Email sent: " + info.response);
+            });
+        }
 
     } catch (err) {
         console.error("❌ Registration Error:", err.message);
