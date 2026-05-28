@@ -110,57 +110,56 @@ app.get('/api/stats', async (req, res) => {
 
 app.post('/api/register', async (req, res) => {
     try {
-        const data = req.body;
-        const email = (data.email || '').toLowerCase().trim();
-        const phone = (data.phone || '').trim();
+        const { name, email, phone, password, role, age, gender, bloodGroup, address, category, lat, lng } = req.body;
+        const cleanEmail = (email || '').toLowerCase().trim();
 
-        if (!email || !phone) {
+        if (!cleanEmail || !phone) {
             return res.status(400).json({ message: 'Email and Phone are required' });
         }
 
-        const existingUser = await User.findOne({ $or: [{ email }, { phone }] });
+        const existingUser = await User.findOne({ $or: [{ email: cleanEmail }, { phone }] });
         if (existingUser) return res.status(400).json({ message: 'Email or Phone already registered' });
 
         const verificationToken = crypto.randomBytes(32).toString('hex');
-        const hashedPassword = await bcrypt.hash(data.password, 10);
+        const hashedPassword = await bcrypt.hash(password, 10);
 
         const newUser = new User({
-            name: data.name,
-            email: email,
-            phone: phone,
+            name,
+            email: cleanEmail,
+            phone,
             password: hashedPassword,
-            role: data.role === 'org' ? 'organization' : 'user',
-            age: data.age,
-            gender: data.gender,
-            bloodGroup: data.bloodGroup,
-            address: data.address,
-            organizationType: data.category,
-            latitude: data.lat,
-            longitude: data.lng,
+            role: role === 'org' ? 'organization' : 'user',
+            age,
+            gender,
+            bloodGroup,
+            address,
+            organizationType: category,
+            latitude: lat,
+            longitude: lng,
             isVerified: false,
             verificationToken
         });
 
         await newUser.save();
 
-        // Use request host to make the link work both locally and in production
+        // Dynamically detect host to make link work on localhost and Render
         const protocol = req.headers['x-forwarded-proto'] || req.protocol;
         const host = req.get('host');
         const verificationLink = `${protocol}://${host}/api/verify/${verificationToken}`;
 
         const mailOptions = {
             from: `"RoadSoS-DigiX Support" <${SUPPORT_EMAIL}>`,
-            to: email,
+            to: cleanEmail,
             subject: 'Complete Your Registration - RoadSoS-DigiX',
             html: `
                 <div style="font-family: sans-serif; background-color: #f4f7fa; padding: 40px;">
                     <div style="max-width: 600px; margin: 0 auto; background-color: #ffffff; border-radius: 16px; padding: 40px; box-shadow: 0 4px 12px rgba(0,0,0,0.05);">
-                        <h2 style="color: #1e293b;">Welcome to RoadSoS-DigiX, ${data.name}!</h2>
-                        <p style="color: #475569; font-size: 16px; line-height: 1.6;">Thank you for joining our safety network. Please verify your account to activate your safety dashboard:</p>
-                        <div style="text-align: center; margin: 30px 0;">
+                        <h2 style="color: #1e293b;">Welcome to RoadSoS-DigiX, ${name}!</h2>
+                        <p style="color: #475569; font-size: 16px; line-height: 1.6;">Thank you for joining our emergency network. Please verify your account to activate your safety dashboard and start accessing real-time services:</p>
+                        <div style="text-align: center; margin: 35px 0;">
                             <a href="${verificationLink}" style="display: inline-block; padding: 16px 36px; background-color: #2563eb; color: #ffffff; text-decoration: none; border-radius: 12px; font-weight: 700; font-size: 16px;">Verify Account</a>
                         </div>
-                        <p style="font-size: 13px; color: #64748b; line-height: 1.6;">If the button doesn't work, please copy and paste this link into your browser:</p>
+                        <p style="font-size: 13px; color: #64748b; line-height: 1.6;">If the button doesn't work, copy and paste this link into your browser:</p>
                         <p style="font-size: 11px; color: #3b82f6; word-break: break-all;">${verificationLink}</p>
                         <hr style="border: 0; border-top: 1px solid #f1f5f9; margin: 30px 0;">
                         <p style="font-size: 12px; color: #94a3b8; text-align: center;">© 2024 RoadSoS-DigiX Network.</p>
@@ -169,7 +168,7 @@ app.post('/api/register', async (req, res) => {
             `
         };
 
-        transporter.sendMail(mailOptions, (error, info) => {
+        transporter.sendMail(mailOptions, (error) => {
             if (error) console.error("❌ Email Error:", error.message);
         });
 
@@ -182,14 +181,15 @@ app.post('/api/register', async (req, res) => {
 
 app.get('/api/verify/:token', async (req, res) => {
     try {
-        const user = await User.findOne({ verificationToken: req.params.token });
+        const token = req.params.token;
+        const user = await User.findOne({ verificationToken: token });
 
         if (!user) {
             return res.status(400).send(`
                 <div style="text-align:center;font-family:sans-serif;margin-top:50px;padding:20px;">
                     <h1 style="color:#e11d48;">Invalid or Expired Link</h1>
                     <p style="color:#64748b;">This verification link is no longer valid. You may have already verified your account.</p>
-                    <a href="https://roadsafetysos.vercel.app/" style="color:#2563eb;text-decoration:none;font-weight:bold;">Go to Login</a>
+                    <a href="https://roadsafetysos.vercel.app/" style="color:#2563eb;text-decoration:none;font-weight:bold;">Go to Homepage</a>
                 </div>
             `);
         }
@@ -202,7 +202,7 @@ app.get('/api/verify/:token', async (req, res) => {
             <div style="text-align:center;font-family:sans-serif;margin-top:50px;padding:20px;">
                 <h1 style="color:#16a34a;">Email Verified Successfully!</h1>
                 <p style="color:#64748b;">Your account is now active. You can close this tab and log in.</p>
-                <a href="https://roadsafetysos.vercel.app/" style="display:inline-block;padding:12px 30px;background:#2563eb;color:#fff;text-decoration:none;border-radius:8px;font-weight:bold;margin-top:20px;">Go to Login Dashboard</a>
+                <a href="https://roadsafetysos.vercel.app/" style="display:inline-block;padding:12px 30px;background:#2563eb;color:#fff;text-decoration:none;border-radius:8px;font-weight:bold;margin-top:20px;">Go to Login</a>
             </div>
         `);
     } catch (err) {
