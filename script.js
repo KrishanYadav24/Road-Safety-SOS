@@ -8,10 +8,10 @@ let newOrgMap = null;
 let newOrgMarker = null;
 
 // Robust API Base URL detection
-// Localhost uses absolute URL, while Deployed uses relative path to avoid host/protocol issues.
+// If on localhost, use local server. Otherwise, point to the Render backend URL.
 const API_BASE = (window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1')
     ? 'http://localhost:3000/api'
-    : '/api';
+    : 'https://road-safety-sos.onrender.com/api';
 
 // Persistence Keys
 const SOS_QUEUE_KEY = 'roadsafetysos_sos_queue';

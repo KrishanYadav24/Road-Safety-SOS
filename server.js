@@ -35,17 +35,21 @@ mongoose.connect(MONGO_URI, {
 const SUPPORT_EMAIL = process.env.SUPPORT_EMAIL || 'roadsosdigix@gmail.com';
 const APP_PASSWORD = process.env.APP_PASSWORD || 'lbcf tejx bhef havn';
 
+// Switched to Port 587 (STARTTLS) to prevent connection timeouts on cloud hosting
 const transporter = nodemailer.createTransport({
     host: 'smtp.gmail.com',
-    port: 465,
-    secure: true,
+    port: 587,
+    secure: false,
     auth: {
         user: SUPPORT_EMAIL,
         pass: APP_PASSWORD
     },
-    connectionTimeout: 10000,
-    greetingTimeout: 10000,
-    socketTimeout: 10000
+    tls: {
+        rejectUnauthorized: false // Helps with some hosting provider restrictions
+    },
+    connectionTimeout: 20000,
+    greetingTimeout: 20000,
+    socketTimeout: 20000
 });
 
 transporter.verify((error) => {
