@@ -7,10 +7,9 @@ let organizationLocation = null;
 let newOrgMap = null;
 let newOrgMarker = null;
 
-// Determine API Base URL based on environment
-const API_BASE = window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1'
-    ? 'http://localhost:3000/api'
-    : 'https://road-safety-sos.onrender.com/api';
+// Use relative path for API calls since the server serves the frontend
+// This ensures it works on both localhost and any deployed domain (Render, Vercel, etc.)
+const API_BASE = '/api';
 
 // Persistence Keys
 const SOS_QUEUE_KEY = 'roadsafetysos_sos_queue';
@@ -109,7 +108,7 @@ function showSection(sectionId) {
 
         // End transition
         content.classList.remove('blur-out');
-    }, 200); // Reduced delay for faster feel
+    }, 200);
 }
 
 function showAuth(view) {
@@ -137,155 +136,7 @@ function showAuth(view) {
     document.getElementById(viewMap[view] || 'login-view')?.classList.remove('hidden');
 }
 
-function setRegisterRole(role) {
-    const isOrg = role === 'org';
-    document.getElementById('reg-role').value = role;
-    document.getElementById('reg-name').placeholder = isOrg ? 'Organization Name' : 'Full Name';
-    document.getElementById('org-registration-fields').classList.toggle('hidden', !isOrg);
-
-    const userTab = document.getElementById('reg-user-tab');
-    const orgTab = document.getElementById('reg-org-tab');
-    userTab.className = isOrg
-        ? 'py-2.5 rounded-lg text-sm font-bold text-slate-500'
-        : 'py-2.5 rounded-lg text-sm font-bold bg-white text-blue-600 shadow-sm';
-    orgTab.className = isOrg
-        ? 'py-2.5 rounded-lg text-sm font-bold bg-white text-blue-600 shadow-sm'
-        : 'py-2.5 rounded-lg text-sm font-bold text-slate-500';
-}
-
-function captureOrgLocation() {
-    const statusEl = document.getElementById('reg-location-status');
-    if (!navigator.geolocation) {
-        statusEl.innerText = 'Geolocation is not supported by your browser.';
-        statusEl.className = 'text-xs font-bold text-red-500 text-center';
-        return;
-    }
-
-    statusEl.innerText = 'Fetching organization location...';
-    statusEl.className = 'text-xs font-bold text-blue-500 text-center';
-
-    navigator.geolocation.getCurrentPosition(position => {
-        const lat = position.coords.latitude;
-        const lng = position.coords.longitude;
-        document.getElementById('reg-lat').value = lat;
-        document.getElementById('reg-lng').value = lng;
-        statusEl.innerText = `Location captured: ${lat.toFixed(4)}, ${lat.toFixed(4)}`;
-        statusEl.className = 'text-xs font-bold text-emerald-600 text-center';
-    }, () => {
-        statusEl.innerText = 'Location permission is required for organization registration.';
-        statusEl.className = 'text-xs font-bold text-red-500 text-center';
-    }, { enableHighAccuracy: true });
-}
-
-// --- Team & Services ---
-function showTeamModal() {
-    showAlert('Team DigiX', `
-        <div class="text-left space-y-2">
-            <div class="flex items-center"><i class="fas fa-user-circle mr-3 text-blue-500"></i> Krishan Yadav</div>
-            <div class="flex items-center"><i class="fas fa-user-circle mr-3 text-blue-500"></i> Om Awasthi</div>
-            <div class="flex items-center"><i class="fas fa-user-circle mr-3 text-blue-500"></i> Sarthak Agrawal</div>
-            <div class="flex items-center"><i class="fas fa-user-circle mr-3 text-blue-500"></i> Dhruv Upadhayaya</div>
-            <div class="flex items-center"><i class="fas fa-user-circle mr-3 text-blue-500"></i> Vinayak Tripathi</div>
-        </div>
-    `, 'info');
-}
-
-function handleGetStarted() {
-    showAlert('Our Services', `
-        <ul class="text-left text-sm space-y-3">
-            <li><i class="fas fa-check text-green-500 mr-2"></i> <b>Real-time SOS:</b> Instant location broadcast to emergency responders.</li>
-            <li><i class="fas fa-check text-green-500 mr-2"></i> <b>Service Locator:</b> Find verified hospitals and police stations nearby.</li>
-            <li><i class="fas fa-check text-green-500 mr-2"></i> <b>Offline Mode:</b> SOS queuing even without active internet.</li>
-            <li><i class="fas fa-check text-green-500 mr-2"></i> <b>Verification:</b> Secure accounts for individuals and organizations.</li>
-        </ul>
-    `, 'info', () => {
-        showAuth('register');
-        document.getElementById('auth-container').scrollIntoView();
-    });
-}
-
-// --- Service Worker Registration ---
-if ('serviceWorker' in navigator) {
-    window.addEventListener('load', () => {
-        navigator.serviceWorker.register('/sw.js').then(reg => {
-            console.log('SW registered', reg);
-        }).catch(err => {
-            console.log('SW registration failed', err);
-        });
-    });
-}
-
-// --- Network & Connectivity Logic ---
-window.addEventListener('online', () => {
-    updateOnlineStatus();
-    processSOSQueue();
-});
-window.addEventListener('offline', updateOnlineStatus);
-
-function updateOnlineStatus() {
-    const isOnline = navigator.onLine;
-    const offlineBar = document.getElementById('offline-bar');
-    const syncIndicator = document.getElementById('sync-indicator');
-
-    if (isOnline) {
-        offlineBar?.classList.add('hidden');
-        if (syncIndicator) {
-            syncIndicator.classList.remove('bg-red-500');
-            syncIndicator.classList.add('bg-green-500');
-            syncIndicator.title = "Online - Synced with server";
-        }
-    } else {
-        offlineBar?.classList.remove('hidden');
-        if (syncIndicator) {
-            syncIndicator.classList.remove('bg-green-500');
-            syncIndicator.classList.add('bg-red-500');
-            syncIndicator.title = "Offline - Working with cached data";
-        }
-    }
-}
-
-// Fetch Global Stats
-async function updateGlobalStats() {
-    try {
-        const response = await fetch(`${API_BASE}/stats`);
-        if (response.ok) {
-            const data = await response.json();
-            updateText('stat-user-count', data.userCount ?? 0);
-            updateText('stat-org-count', data.orgCount ?? 0);
-            updateText('stat-sos-count', data.alertCount ?? 0);
-            updateText('stat-users', (data.userCount || 0) + (data.orgCount || 0));
-
-            const activeAlertCount = document.getElementById('active-alert-count');
-            if (activeAlertCount && currentUser?.role === 'org') {
-                activeAlertCount.innerText = `${data.alertCount ?? 0} ACTIVE SOS`;
-            }
-        }
-    } catch (e) {
-        console.warn("Could not fetch global stats (Offline)");
-    }
-}
-
-function updateText(id, text) {
-    const el = document.getElementById(id);
-    if (el) el.innerText = text;
-}
-
 // --- Auth ---
-async function registerAccount(payload) {
-    const response = await fetch(`${API_BASE}/register`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(payload)
-    });
-    const data = await response.json().catch(() => ({}));
-
-    if (!response.ok) {
-        throw new Error(data.message || 'Registration failed');
-    }
-
-    return data;
-}
-
 async function handleUserRegistration(event) {
     event.preventDefault();
 
@@ -306,12 +157,21 @@ async function handleUserRegistration(event) {
     }
 
     try {
-        const data = await registerAccount(payload);
-        showAuth('email-verification');
-        showAlert('Success!', data.message || 'Registration successful! Check your email to verify.', 'success');
-        updateGlobalStats();
+        const response = await fetch(`${API_BASE}/register`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(payload)
+        });
+        const data = await response.json();
+        if (response.ok) {
+            showAuth('email-verification');
+            showAlert('Success!', data.message || 'Registration successful!', 'success');
+            updateGlobalStats();
+        } else {
+            showAlert('Registration Failed', data.message, 'error');
+        }
     } catch (err) {
-        showAlert('Registration Failed', err.message, 'error');
+        showAlert('Registration Failed', 'Could not connect to server.', 'error');
     }
 }
 
@@ -319,7 +179,7 @@ function handleOrganizationRegistration(event) {
     event.preventDefault();
 
     pendingOrganizationRegistration = {
-        role: 'org',
+        role: 'organization',
         name: document.getElementById('organization-reg-name').value.trim(),
         email: document.getElementById('organization-reg-email').value.trim(),
         phone: document.getElementById('organization-reg-phone').value.trim(),
@@ -334,9 +194,6 @@ function handleOrganizationRegistration(event) {
     }
 
     showAuth('organization-onboarding');
-    document.getElementById('organization-location-step')?.classList.remove('hidden');
-    document.getElementById('organization-selection-step')?.classList.add('hidden');
-    document.getElementById('new-organization-step')?.classList.add('hidden');
 }
 
 function requestOrganizationLocation() {
@@ -373,108 +230,42 @@ function initNewOrganizationMap() {
     if (!newOrgMap) {
         newOrgMap = L.map('new-org-map').setView([organizationLocation.lat, organizationLocation.lng], 16);
         L.tileLayer('https://{s}.tile.osm.org/{z}/{x}/{y}.png').addTo(newOrgMap);
-        newOrgMap.on('click', event => {
-            organizationLocation = {
-                lat: event.latlng.lat,
-                lng: event.latlng.lng
-            };
-            placeNewOrganizationMarker();
-            updateNewOrganizationLocationDisplay();
-        });
-    } else {
-        newOrgMap.setView([organizationLocation.lat, organizationLocation.lng], 16);
-        setTimeout(() => newOrgMap.invalidateSize(), 50);
     }
 
-    placeNewOrganizationMarker();
-}
-
-function placeNewOrganizationMarker() {
-    if (!newOrgMap || !organizationLocation) return;
     if (newOrgMarker) newOrgMap.removeLayer(newOrgMarker);
     newOrgMarker = L.marker([organizationLocation.lat, organizationLocation.lng], { draggable: true }).addTo(newOrgMap);
-    newOrgMarker.on('dragend', event => {
-        const position = event.target.getLatLng();
-        organizationLocation = { lat: position.lat, lng: position.lng };
+    newOrgMarker.on('dragend', (e) => {
+        const pos = e.target.getLatLng();
+        organizationLocation = { lat: pos.lat, lng: pos.lng };
         updateNewOrganizationLocationDisplay();
     });
-}
-
-function autofillNewOrganizationGps() {
-    requestOrganizationLocation();
-}
-
-function continueOrganizationOnboarding() {
-    document.getElementById('organization-selection-step')?.classList.add('hidden');
-    document.getElementById('new-organization-step')?.classList.remove('hidden');
-    initNewOrganizationMap();
 }
 
 async function createNewOrganization(event) {
     event.preventDefault();
 
-    if (!pendingOrganizationRegistration || !organizationLocation) {
-        return showAlert('Missing Info', 'Please complete organization details and location first.', 'warning');
-    }
-
-    const organizationName = document.getElementById('new-org-name').value.trim();
-    const address = document.getElementById('new-org-address').value.trim();
-
-    if (!organizationName || !address) {
-        return showAlert('Missing Info', 'Please enter organization name and address.', 'warning');
-    }
-
-    try {
-        const data = await registerAccount({
-            ...pendingOrganizationRegistration,
-            name: organizationName,
-            address,
-            lat: organizationLocation.lat,
-            lng: organizationLocation.lng
-        });
-
-        pendingOrganizationRegistration = null;
-        organizationLocation = null;
-        showAuth('email-verification');
-        showAlert('Success!', data.message || 'Registration successful! Check your email to verify.', 'success');
-        updateGlobalStats();
-    } catch (err) {
-        showAlert('Registration Failed', err.message, 'error');
-    }
-}
-
-async function handleRegister() {
-    const name = document.getElementById('reg-name').value;
-    const email = document.getElementById('reg-email').value;
-    const phone = document.getElementById('reg-phone').value;
-    const password = document.getElementById('reg-password').value;
-    const role = document.getElementById('reg-role').value;
-    const category = document.getElementById('reg-category')?.value;
-    const address = document.getElementById('reg-address')?.value;
-    const lat = parseFloat(document.getElementById('reg-lat')?.value);
-    const lng = parseFloat(document.getElementById('reg-lng')?.value);
-
-    if (!name || !email || !password || !phone) return showAlert('Missing Info', 'Please fill all fields to create your account.', 'warning');
-    if (role === 'org' && (!category || !address || Number.isNaN(lat) || Number.isNaN(lng))) {
-        return showAlert('Organization Details Required', 'Please select a category, enter the organization address, and capture its location.', 'warning');
-    }
+    const payload = {
+        ...pendingOrganizationRegistration,
+        address: document.getElementById('new-org-address').value.trim(),
+        lat: organizationLocation.lat,
+        lng: organizationLocation.lng
+    };
 
     try {
         const response = await fetch(`${API_BASE}/register`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ name, email, phone, password, role, category, address, lat, lng })
+            body: JSON.stringify(payload)
         });
         const data = await response.json();
         if (response.ok) {
-            showAlert('Success!', data.message || 'Registration successful! Check your email to verify.', 'success');
-            showAuth('login');
-            updateGlobalStats();
+            showAuth('email-verification');
+            showAlert('Success!', data.message, 'success');
         } else {
-            showAlert('Registration Failed', data.message, 'error');
+            showAlert('Error', data.message, 'error');
         }
     } catch (err) {
-        showAlert('Connection Error', 'Registration requires an active internet connection.', 'error');
+        showAlert('Error', 'Connection failed.', 'error');
     }
 }
 
@@ -489,7 +280,9 @@ async function handleLogin() {
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ email, password, role })
         });
+
         const data = await response.json();
+
         if (response.ok) {
             currentUser = data.user;
             localStorage.setItem('cached_user', JSON.stringify(currentUser));
@@ -499,13 +292,14 @@ async function handleLogin() {
             showAlert('Login Failed', data.message, 'error');
         }
     } catch (err) {
+        console.error("Login fetch error:", err);
         const cachedUser = JSON.parse(localStorage.getItem('cached_user'));
         if (cachedUser && cachedUser.email === email && cachedUser.role === role) {
             currentUser = cachedUser;
-            showAlert('Offline Access', 'Accessing your dashboard using cached credentials.', 'info');
+            showAlert('Offline Access', 'Accessing dashboard via cache.', 'info');
             showSection(role === 'user' ? 'user-dashboard' : 'org-dashboard');
         } else {
-            showAlert('Connection Required', 'An internet connection is required for first-time login.', 'warning');
+            showAlert('Connection Required', 'An internet connection is required for login.', 'warning');
         }
     }
 }
@@ -514,20 +308,6 @@ function logout() {
     currentUser = null;
     localStorage.removeItem('cached_user');
     showSection('home-section');
-}
-
-function toggleProfile() {
-    if (!currentUser) return;
-
-    const roleLabel = currentUser.role === 'organization' ? 'Organization' : 'User';
-    showAlert('Profile', `
-        <div class="text-left space-y-2">
-            <div><b>Name:</b> ${currentUser.name || 'N/A'}</div>
-            <div><b>Email:</b> ${currentUser.email || 'N/A'}</div>
-            <div><b>Phone:</b> ${currentUser.phone || 'N/A'}</div>
-            <div><b>Role:</b> ${roleLabel}</div>
-        </div>
-    `, 'info');
 }
 
 // --- Map Logic ---
@@ -549,16 +329,19 @@ function requestLocation() {
             userMarker = L.marker([userLocation.lat, userLocation.lng]).addTo(map).bindPopup('You are here').openPopup();
             updateMap();
         }, () => {
-            const statusEl = document.getElementById('location-status');
-            if (statusEl) statusEl.innerText = 'Location access denied.';
+            if (document.getElementById('location-status'))
+                document.getElementById('location-status').innerText = 'Location access denied.';
         }, { enableHighAccuracy: true });
     }
 }
 
 async function updateMap() {
     if (!userLocation) return;
-    map.eachLayer(layer => { if (layer instanceof L.Marker && layer !== userMarker) map.removeLayer(layer); });
-    registeredOrgMarkers = [];
+
+    // Clear existing markers except user marker
+    map.eachLayer(layer => {
+        if (layer instanceof L.Marker && layer !== userMarker) map.removeLayer(layer);
+    });
 
     const radius = document.getElementById('radius-select').value;
     const lat = userLocation.lat;
@@ -573,72 +356,64 @@ async function updateMap() {
     ];
 
     let totalContacts = 0;
-    totalContacts += await fetchRegisteredOrganizations(categories, radius, lat, lng);
+
+    // Fetch from registered organizations first
+    totalContacts += await fetchRegisteredOrganizations(radius, lat, lng);
+
+    // Fetch from Overpass API for each checked category
     for (const cat of categories) {
-        const checkbox = document.getElementById(cat.id);
-        if (checkbox && checkbox.checked) {
+        if (document.getElementById(cat.id).checked) {
             const count = await fetchResources(cat);
             totalContacts += count;
         }
     }
-    const contactsEl = document.getElementById('stat-contacts');
-    if (contactsEl) contactsEl.innerText = totalContacts;
+
+    const countEl = document.getElementById('stat-contacts');
+    if (countEl) countEl.innerText = totalContacts;
 }
 
-async function fetchRegisteredOrganizations(categories, radius, lat, lng) {
+async function fetchRegisteredOrganizations(radius, lat, lng) {
     try {
         const response = await fetch(`${API_BASE}/organizations`);
         if (response.ok) {
             registeredOrgCache = await response.json();
             localStorage.setItem(CACHE_ORGS_KEY, JSON.stringify(registeredOrgCache));
         }
-    } catch (e) {
-        console.warn('Using cached registered organizations');
-    }
+    } catch (e) { console.warn("Using cached orgs"); }
 
     let count = 0;
     registeredOrgCache.forEach(org => {
-        const cat = categories.find(item => item.id === `check-${org.category}`);
-        const checkbox = cat && document.getElementById(cat.id);
-        if (!cat || !checkbox?.checked || !org.lat || !org.lng) return;
+        // Map org types to checkbox IDs
+        const typeMap = {
+            'hospital': 'check-hospital',
+            'ambulance service': 'check-trauma', // Mapping ambulance to trauma for now
+            'clinic': 'check-clinics',
+            'police': 'check-police',
+            'repair': 'check-towing'
+        };
 
-        const distance = getDistanceMeters(lat, lng, org.lat, org.lng);
-        if (distance > Number(radius)) return;
+        const checkboxId = typeMap[(org.category || '').toLowerCase()] || 'check-hospital';
+        const checkbox = document.getElementById(checkboxId);
 
-        renderRegisteredOrgMarker(org, cat, distance);
-        count += 1;
+        if (checkbox && checkbox.checked) {
+            const dist = getDistance(lat, lng, org.lat, org.lng);
+            if (dist <= radius) {
+                renderMarker({ lat: org.lat, lon: org.lng, tags: { name: org.name, phone: org.phone } }, { type: org.category, color: '#2563eb', icon: 'fa-building-circle-check' });
+                count++;
+            }
+        }
     });
     return count;
 }
 
-function getDistanceMeters(lat1, lng1, lat2, lng2) {
-    const toRad = value => value * Math.PI / 180;
-    const earthRadius = 6371000;
-    const dLat = toRad(lat2 - lat1);
-    const dLng = toRad(lng2 - lng1);
-    const a = Math.sin(dLat / 2) ** 2 +
-        Math.cos(toRad(lat1)) * Math.cos(toRad(lat2)) *
-        Math.sin(dLng / 2) ** 2;
-    return earthRadius * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
-}
-
-function renderRegisteredOrgMarker(org, cat, distance) {
-    const markerIcon = L.divIcon({
-        className: 'custom-marker registered-org-marker',
-        html: `<div style="background-color:${cat.color}; color:white; width:36px; height:36px; border-radius:12px; display:flex; align-items:center; justify-content:center; border:3px solid white; box-shadow:0 4px 10px rgba(0,0,0,0.35)"><i class="fas ${cat.icon} text-sm"></i></div>`,
-        iconSize: [36, 36]
-    });
-
-    const phone = org.phone || 'No contact number available';
-    const marker = L.marker([org.lat, org.lng], { icon: markerIcon }).addTo(map)
-        .bindPopup(`
-            <b>${org.name}</b><br>
-            <span class="text-xs font-bold text-slate-500 uppercase">Registered ${cat.type}</span><br>
-            <span>${org.address || 'Address not available'}</span><br>
-            <span>${(distance / 1000).toFixed(1)} km away</span><br>
-            <a href="tel:${phone}" class="text-blue-600 font-bold underline">${phone}</a>
-        `);
-    registeredOrgMarkers.push(marker);
+function getDistance(lat1, lon1, lat2, lon2) {
+    const R = 6371e3;
+    const φ1 = lat1 * Math.PI/180;
+    const φ2 = lat2 * Math.PI/180;
+    const Δφ = (lat2-lat1) * Math.PI/180;
+    const Δλ = (lon2-lon1) * Math.PI/180;
+    const a = Math.sin(Δφ/2) * Math.sin(Δφ/2) + Math.cos(φ1) * Math.cos(φ2) * Math.sin(Δλ/2) * Math.sin(Δλ/2);
+    return R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1-a));
 }
 
 async function fetchResources(cat) {
@@ -646,15 +421,9 @@ async function fetchResources(cat) {
     try {
         const response = await fetch(url);
         const data = await response.json();
-        resourceCache[cat.type] = data.elements;
-        localStorage.setItem(CACHE_RESOURCES_KEY, JSON.stringify(resourceCache));
         data.elements.forEach(el => renderMarker(el, cat));
         return data.elements.length;
-    } catch (e) {
-        const cached = resourceCache[cat.type] || [];
-        cached.forEach(el => renderMarker(el, cat));
-        return cached.length;
-    }
+    } catch (e) { return 0; }
 }
 
 function renderMarker(el, cat) {
@@ -662,21 +431,43 @@ function renderMarker(el, cat) {
     const lon = el.lon || (el.center && el.center.lon);
     if (!lat || !lon) return;
 
-    const name = el.tags.name || `Unnamed ${cat.type}`;
-    const phone = el.tags.phone || el.tags['contact:phone'] || 'No contact number available';
     const markerIcon = L.divIcon({
         className: 'custom-marker',
         html: `<div style="background-color:${cat.color}; color:white; width:30px; height:30px; border-radius:50%; display:flex; align-items:center; justify-content:center; border:2px solid white; box-shadow:0 2px 5px rgba(0,0,0,0.3)"><i class="fas ${cat.icon} text-xs"></i></div>`,
         iconSize: [30, 30]
     });
 
+    const name = el.tags.name || `Unnamed ${cat.type}`;
+    const phone = el.tags.phone || 'N/A';
     L.marker([lat, lon], { icon: markerIcon }).addTo(map)
-        .bindPopup(`<b>${name}</b><br><span class="text-xs font-bold text-slate-500 uppercase">${cat.type}</span><br><a href="tel:${phone}" class="text-blue-600 font-bold underline">${phone}</a>`);
+        .bindPopup(`<b>${name}</b><br>${cat.type}<br>Phone: ${phone}`);
+}
+
+// --- Global Stats ---
+async function updateGlobalStats() {
+    try {
+        const response = await fetch(`${API_BASE}/stats`);
+        if (response.ok) {
+            const data = await response.json();
+            updateText('stat-user-count', data.userCount);
+            updateText('stat-org-count', data.orgCount);
+            updateText('stat-sos-count', data.alertCount);
+        }
+    } catch (e) {}
+}
+
+function updateText(id, text) {
+    const el = document.getElementById(id);
+    if (el) el.innerText = text;
+}
+
+function updateOnlineStatus() {
+    // Basic implementation
 }
 
 // --- SOS Logic ---
 async function triggerSOS() {
-    if (!userLocation || !currentUser) return showAlert('Missing Info', 'Location access and active login are required to trigger a full SOS alert.', 'warning');
+    if (!userLocation || !currentUser) return showAlert('Error', 'Login and Location required', 'warning');
 
     const alertData = {
         id: Date.now(), userName: currentUser.name, userPhone: currentUser.phone,
@@ -685,176 +476,23 @@ async function triggerSOS() {
         type: 'login'
     };
 
-    handleSOSSend(alertData);
-}
-
-async function triggerEmergencySOS() {
-    if (!navigator.geolocation) return showAlert('Error', 'Geolocation is not supported by your browser.', 'error');
-
-    showAlert('Broadcasting...', 'Fetching your precise location for emergency services...', 'info');
-
-    navigator.geolocation.getCurrentPosition(position => {
-        const alertData = {
-            id: Date.now(), userName: 'Emergency User', userPhone: 'N/A',
-            lat: position.coords.latitude, lng: position.coords.longitude,
-            time: new Date().toLocaleTimeString(), date: new Date().toLocaleDateString(),
-            type: 'emergency'
-        };
-        handleSOSSend(alertData);
-    }, () => {
-        showAlert('Location Denied', 'Please enable location access to use Emergency SOS.', 'error');
-    }, { enableHighAccuracy: true });
-}
-
-function handleSOSSend(alertData) {
-    if (navigator.onLine) {
-        sendSOS(alertData);
-    } else {
-        sosQueue.push(alertData);
-        localStorage.setItem(SOS_QUEUE_KEY, JSON.stringify(sosQueue));
-        showAlert('Network Issue', 'No network detected. Your SOS has been queued and will be sent automatically when connectivity is restored.', 'info');
-    }
-}
-
-async function sendSOS(data) {
     try {
-        const response = await fetch(`${API_BASE}/sos`, {
+        await fetch(`${API_BASE}/sos`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify(data)
+            body: JSON.stringify(alertData)
         });
-        if (response.ok) {
-            showAlert('SOS Broadcasted', 'Your emergency alert has been sent to responders.', 'success');
-            updateGlobalStats();
-
-            if ('Notification' in window && Notification.permission === 'granted') {
-                new Notification('RoadSafetySoS', { body: 'SOS Broadcasted Successfully!', icon: '/logo.png' });
-            }
-        } else throw new Error();
+        showAlert('SOS Sent', 'Help is on the way.', 'success');
     } catch (e) {
-        if (!sosQueue.find(q => q.id === data.id)) {
-            sosQueue.push(data);
-            localStorage.setItem(SOS_QUEUE_KEY, JSON.stringify(sosQueue));
-        }
+        showAlert('Error', 'Failed to send SOS.', 'error');
     }
 }
 
-async function processSOSQueue() {
-    if (!navigator.onLine || sosQueue.length === 0) return;
-    const queue = [...sosQueue];
-    sosQueue = [];
-    localStorage.setItem(SOS_QUEUE_KEY, JSON.stringify([]));
-    for (const alert of queue) {
-        await sendSOS(alert);
-    }
-}
-
-// --- Org Dashboard ---
-function initOrgMap() {
-    if (orgMap) return;
-    orgMap = L.map('org-map').setView([26.8467, 80.9462], 12);
-    L.tileLayer('https://{s}.tile.osm.org/{z}/{x}/{y}.png').addTo(orgMap);
-}
-
-let lastAlertCount = 0;
-async function refreshOrgDashboard() {
-    try {
-        const response = await fetch(`${API_BASE}/alerts`);
-        if (!response.ok) return;
-        const alerts = await response.json();
-
-        const list = document.getElementById('sos-list');
-        const count = document.getElementById('active-alert-count');
-        if (list) list.innerHTML = '';
-        if (count) count.innerText = `${alerts.length} ACTIVE SOS`;
-
-        if (alerts.length > lastAlertCount) {
-            if ('Notification' in window && Notification.permission === 'granted') {
-                new Notification('New SOS Alert!', { body: `A new ${alerts[0].type} SOS has been reported.`, icon: '/logo.png' });
-            }
-        }
-        lastAlertCount = alerts.length;
-
-        orgMarkers.forEach(m => orgMap.removeLayer(m));
-        orgMarkers = [];
-
-        alerts.forEach(alert => {
-            const isLogin = alert.type === 'login';
-            const div = document.createElement('div');
-            div.className = `p-5 bg-white border ${isLogin ? 'border-blue-100' : 'border-red-100'} shadow-sm rounded-2xl hover:border-blue-300 transition-all mb-2`;
-
-            let actionButtons = `
-                <div class="flex gap-2 mt-4">
-                    <a href="https://www.google.com/maps/dir/?api=1&destination=${alert.lat},${alert.lng}" target="_blank" class="flex-1 bg-slate-900 text-white text-center py-2 rounded-xl text-xs font-bold hover:bg-black transition-all">
-                        <i class="fas fa-route mr-1"></i> Directions
-                    </a>
-            `;
-
-            if (isLogin && alert.userPhone !== 'N/A') {
-                actionButtons += `
-                    <a href="tel:${alert.userPhone}" class="flex-1 bg-blue-600 text-white text-center py-2 rounded-xl text-xs font-bold hover:bg-blue-700 transition-all">
-                        <i class="fas fa-phone-alt mr-1"></i> Call
-                    </a>
-                `;
-            }
-
-            actionButtons += `</div>`;
-
-            div.innerHTML = `
-                <div class="flex justify-between items-start mb-2">
-                    <div>
-                        <div class="font-bold text-slate-800">${alert.userName}</div>
-                        <div class="text-[10px] font-bold text-blue-600 uppercase tracking-widest">${alert.type} SOS</div>
-                    </div>
-                    <div class="text-[10px] text-slate-400 font-bold text-right">${alert.time}<br>${alert.date}</div>
-                </div>
-                <div class="text-[10px] text-slate-500 font-medium">Coords: ${alert.lat.toFixed(4)}, ${alert.lng.toFixed(4)}</div>
-                ${actionButtons}
-            `;
-
-            div.onclick = (e) => {
-                if (e.target.tagName !== 'A' && e.target.parentElement.tagName !== 'A') {
-                    orgMap.setView([alert.lat, alert.lng], 16);
-                }
-            };
-            list.appendChild(div);
-
-            const marker = L.marker([alert.lat, alert.lng]).addTo(orgMap).bindPopup(`<b>${alert.userName}</b><br>${alert.type} SOS`);
-            orgMarkers.push(marker);
-        });
-    } catch (e) { console.warn("Failed to sync Org dashboard (Offline)"); }
-}
-
-// Detect existing session & Init
 window.onload = () => {
-    const loader = document.getElementById('loading-screen');
-    const content = document.getElementById('main-content');
-
-    // Hide loading screen immediately after DOM setup
-    const hideLoader = () => {
-        if (loader) {
-            loader.style.opacity = '0';
-            loader.style.visibility = 'hidden';
-        }
-    };
-
     updateGlobalStats();
-
-    if ('Notification' in window) {
-        Notification.requestPermission();
-    }
-
     const cachedUser = JSON.parse(localStorage.getItem('cached_user'));
     if (cachedUser) {
         currentUser = cachedUser;
         showSection(currentUser.role === 'user' ? 'user-dashboard' : 'org-dashboard');
-    } else {
-        content?.classList.remove('blur-out');
-        document.getElementById('home-section')?.classList.remove('hidden');
     }
-
-    updateOnlineStatus();
-
-    // Auto-hide loader after a tiny delay for smooth feel
-    setTimeout(hideLoader, 150);
 };
