@@ -35,16 +35,28 @@ mongoose.connect(MONGO_URI, {
 const SUPPORT_EMAIL = process.env.SUPPORT_EMAIL || 'roadsosdigix@gmail.com';
 const APP_PASSWORD = process.env.APP_PASSWORD || 'lbcf tejx bhef havn';
 
+// Render and other cloud providers often block port 587 or default SMTP ports.
+// Using explicit host and port 465 (SSL) is usually more reliable on these platforms.
 const transporter = nodemailer.createTransport({
     host: 'smtp.gmail.com',
-    port: 587,
-    secure: false,
+    port: 465,
+    secure: true, // Use SSL
     auth: {
         user: SUPPORT_EMAIL,
         pass: APP_PASSWORD
     },
-    tls: {
-        rejectUnauthorized: false
+    // Increased timeout settings to handle slow cloud network connections
+    connectionTimeout: 10000,
+    greetingTimeout: 10000,
+    socketTimeout: 10000
+});
+
+// Verify email connection on startup
+transporter.verify((error, success) => {
+    if (error) {
+        console.error("❌ Email transporter error:", error.message);
+    } else {
+        console.log("✅ Email server is ready to send messages");
     }
 });
 
@@ -142,37 +154,38 @@ app.post('/api/register', async (req, res) => {
 
         await newUser.save();
 
-        // Dynamically detect host to make link work on localhost and Render
         const protocol = req.headers['x-forwarded-proto'] || req.protocol;
         const host = req.get('host');
-        const verificationLink = `${protocol}://${host}/api/verify/${verificationToken}`;
+        // On Render, we want to ensure we use the Production URL for the link if available
+        const baseUrl = process.env.PRODUCTION_URL || `${protocol}://${host}`;
+        const verificationLink = `${baseUrl}/api/verify/${verificationToken}`;
 
         const mailOptions = {
-            from: `"RoadSoS-DigiX Support" <${SUPPORT_EMAIL}>`,
+            from: `"RoadSoS Support" <${SUPPORT_EMAIL}>`,
             to: cleanEmail,
-            subject: 'Complete Your Registration - RoadSoS-DigiX',
+            subject: 'Verify Your RoadSoS Account',
             html: `
-                <div style="font-family: sans-serif; background-color: #f4f7fa; padding: 40px;">
-                    <div style="max-width: 600px; margin: 0 auto; background-color: #ffffff; border-radius: 16px; padding: 40px; box-shadow: 0 4px 12px rgba(0,0,0,0.05);">
-                        <h2 style="color: #1e293b;">Welcome to RoadSoS-DigiX, ${name}!</h2>
-                        <p style="color: #475569; font-size: 16px; line-height: 1.6;">Thank you for joining our emergency network. Please verify your account to activate your safety dashboard and start accessing real-time services:</p>
-                        <div style="text-align: center; margin: 35px 0;">
-                            <a href="${verificationLink}" style="display: inline-block; padding: 16px 36px; background-color: #2563eb; color: #ffffff; text-decoration: none; border-radius: 12px; font-weight: 700; font-size: 16px;">Verify Account</a>
-                        </div>
-                        <p style="font-size: 13px; color: #64748b; line-height: 1.6;">If the button doesn't work, copy and paste this link into your browser:</p>
-                        <p style="font-size: 11px; color: #3b82f6; word-break: break-all;">${verificationLink}</p>
-                        <hr style="border: 0; border-top: 1px solid #f1f5f9; margin: 30px 0;">
-                        <p style="font-size: 12px; color: #94a3b8; text-align: center;">© 2024 RoadSoS-DigiX Network.</p>
+                <div style="font-family: Arial, sans-serif; max-width: 600px; margin: auto; padding: 20px; border: 1px solid #e2e8f0; border-radius: 10px;">
+                    <h2 style="color: #2563eb;">Welcome to RoadSoS, ${name}!</h2>
+                    <p>Thank you for joining our emergency network. Please click the button below to verify your email address:</p>
+                    <div style="text-align: center; margin: 30px 0;">
+                        <a href="${verificationLink}" style="background-color: #2563eb; color: white; padding: 12px 24px; text-decoration: none; border-radius: 5px; font-weight: bold;">Verify Account</a>
                     </div>
+                    <p style="font-size: 12px; color: #64748b;">If the button doesn't work, copy and paste this link: <br> ${verificationLink}</p>
                 </div>
             `
         };
 
-        transporter.sendMail(mailOptions, (error) => {
-            if (error) console.error("❌ Email Error:", error.message);
+        // Send email and log result
+        transporter.sendMail(mailOptions, (error, info) => {
+            if (error) {
+                console.error("❌ Email Error:", error.message);
+            } else {
+                console.log("✅ Email sent: " + info.response);
+            }
         });
 
-        res.json({ message: 'Registration successful! Check email to verify.' });
+        res.json({ message: 'Registration successful! Check your email for verification.' });
     } catch (err) {
         console.error("❌ Registration Error:", err.message);
         res.status(500).json({ message: 'Registration Failed: ' + err.message });
@@ -185,29 +198,17 @@ app.get('/api/verify/:token', async (req, res) => {
         const user = await User.findOne({ verificationToken: token });
 
         if (!user) {
-            return res.status(400).send(`
-                <div style="text-align:center;font-family:sans-serif;margin-top:50px;padding:20px;">
-                    <h1 style="color:#e11d48;">Invalid or Expired Link</h1>
-                    <p style="color:#64748b;">This verification link is no longer valid. You may have already verified your account.</p>
-                    <a href="https://roadsafetysos.vercel.app/" style="color:#2563eb;text-decoration:none;font-weight:bold;">Go to Homepage</a>
-                </div>
-            `);
+            return res.status(400).send('<h1>Invalid or Expired Link</h1>');
         }
 
         user.isVerified = true;
         user.verificationToken = undefined;
         await user.save();
 
-        res.send(`
-            <div style="text-align:center;font-family:sans-serif;margin-top:50px;padding:20px;">
-                <h1 style="color:#16a34a;">Email Verified Successfully!</h1>
-                <p style="color:#64748b;">Your account is now active. You can close this tab and log in.</p>
-                <a href="https://roadsafetysos.vercel.app/" style="display:inline-block;padding:12px 30px;background:#2563eb;color:#fff;text-decoration:none;border-radius:8px;font-weight:bold;margin-top:20px;">Go to Login</a>
-            </div>
-        `);
+        res.send('<h1>Email Verified Successfully! You can now log in.</h1>');
     } catch (err) {
         console.error("❌ Verification Error:", err);
-        res.status(500).send('An error occurred during verification.');
+        res.status(500).send('Verification error.');
     }
 });
 
