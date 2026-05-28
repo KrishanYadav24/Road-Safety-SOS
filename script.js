@@ -2,6 +2,10 @@ let map, userMarker, orgMap, orgMarkers = [];
 let userLocation = null;
 let currentUser = null;
 let registeredOrgMarkers = [];
+let pendingOrganizationRegistration = null;
+let organizationLocation = null;
+let newOrgMap = null;
+let newOrgMarker = null;
 
 // Determine API Base URL based on environment
 const API_BASE = window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1'
@@ -109,13 +113,28 @@ function showSection(sectionId) {
 }
 
 function showAuth(view) {
-    if (view === 'login') {
-        document.getElementById('login-view').classList.remove('hidden');
-        document.getElementById('register-view').classList.add('hidden');
-    } else {
-        document.getElementById('login-view').classList.add('hidden');
-        document.getElementById('register-view').classList.remove('hidden');
-    }
+    const views = [
+        'login-view',
+        'auth-choice-view',
+        'user-register-view',
+        'organization-register-view',
+        'organization-onboarding-view',
+        'email-verification-view'
+    ];
+
+    views.forEach(id => document.getElementById(id)?.classList.add('hidden'));
+
+    const viewMap = {
+        login: 'login-view',
+        register: 'auth-choice-view',
+        choice: 'auth-choice-view',
+        'user-register': 'user-register-view',
+        'organization-register': 'organization-register-view',
+        'organization-onboarding': 'organization-onboarding-view',
+        'email-verification': 'email-verification-view'
+    };
+
+    document.getElementById(viewMap[view] || 'login-view')?.classList.remove('hidden');
 }
 
 function setRegisterRole(role) {
@@ -252,6 +271,178 @@ function updateText(id, text) {
 }
 
 // --- Auth ---
+async function registerAccount(payload) {
+    const response = await fetch(`${API_BASE}/register`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload)
+    });
+    const data = await response.json().catch(() => ({}));
+
+    if (!response.ok) {
+        throw new Error(data.message || 'Registration failed');
+    }
+
+    return data;
+}
+
+async function handleUserRegistration(event) {
+    event.preventDefault();
+
+    const payload = {
+        role: 'user',
+        name: document.getElementById('user-reg-name').value.trim(),
+        email: document.getElementById('user-reg-email').value.trim(),
+        phone: document.getElementById('user-reg-phone').value.trim(),
+        password: document.getElementById('user-reg-password').value,
+        age: document.getElementById('user-reg-age').value,
+        gender: document.getElementById('user-reg-gender').value,
+        bloodGroup: document.getElementById('user-reg-blood-group').value,
+        address: document.getElementById('user-reg-address').value.trim()
+    };
+
+    if (!payload.name || !payload.email || !payload.phone || !payload.password) {
+        return showAlert('Missing Info', 'Please fill name, email, phone, and password.', 'warning');
+    }
+
+    try {
+        const data = await registerAccount(payload);
+        showAuth('email-verification');
+        showAlert('Success!', data.message || 'Registration successful! Check your email to verify.', 'success');
+        updateGlobalStats();
+    } catch (err) {
+        showAlert('Registration Failed', err.message, 'error');
+    }
+}
+
+function handleOrganizationRegistration(event) {
+    event.preventDefault();
+
+    pendingOrganizationRegistration = {
+        role: 'org',
+        name: document.getElementById('organization-reg-name').value.trim(),
+        email: document.getElementById('organization-reg-email').value.trim(),
+        phone: document.getElementById('organization-reg-phone').value.trim(),
+        password: document.getElementById('organization-reg-password').value,
+        category: document.getElementById('organization-reg-type').value
+    };
+
+    if (!pendingOrganizationRegistration.name || !pendingOrganizationRegistration.email ||
+        !pendingOrganizationRegistration.phone || !pendingOrganizationRegistration.password ||
+        !pendingOrganizationRegistration.category) {
+        return showAlert('Missing Info', 'Please fill all organization registration fields.', 'warning');
+    }
+
+    showAuth('organization-onboarding');
+    document.getElementById('organization-location-step')?.classList.remove('hidden');
+    document.getElementById('organization-selection-step')?.classList.add('hidden');
+    document.getElementById('new-organization-step')?.classList.add('hidden');
+}
+
+function requestOrganizationLocation() {
+    if (!navigator.geolocation) {
+        return showAlert('Location Unavailable', 'Geolocation is not supported by your browser.', 'error');
+    }
+
+    navigator.geolocation.getCurrentPosition(position => {
+        organizationLocation = {
+            lat: position.coords.latitude,
+            lng: position.coords.longitude
+        };
+
+        document.getElementById('organization-location-step')?.classList.add('hidden');
+        document.getElementById('new-organization-step')?.classList.remove('hidden');
+
+        document.getElementById('new-org-name').value = pendingOrganizationRegistration?.name || '';
+        updateNewOrganizationLocationDisplay();
+        initNewOrganizationMap();
+    }, () => {
+        showAlert('Location Denied', 'Please allow location access to register your organization.', 'warning');
+    }, { enableHighAccuracy: true });
+}
+
+function updateNewOrganizationLocationDisplay() {
+    if (!organizationLocation) return;
+    updateText('new-org-lat-display', `Lat: ${organizationLocation.lat.toFixed(6)}`);
+    updateText('new-org-lng-display', `Lng: ${organizationLocation.lng.toFixed(6)}`);
+}
+
+function initNewOrganizationMap() {
+    if (!organizationLocation || !document.getElementById('new-org-map')) return;
+
+    if (!newOrgMap) {
+        newOrgMap = L.map('new-org-map').setView([organizationLocation.lat, organizationLocation.lng], 16);
+        L.tileLayer('https://{s}.tile.osm.org/{z}/{x}/{y}.png').addTo(newOrgMap);
+        newOrgMap.on('click', event => {
+            organizationLocation = {
+                lat: event.latlng.lat,
+                lng: event.latlng.lng
+            };
+            placeNewOrganizationMarker();
+            updateNewOrganizationLocationDisplay();
+        });
+    } else {
+        newOrgMap.setView([organizationLocation.lat, organizationLocation.lng], 16);
+        setTimeout(() => newOrgMap.invalidateSize(), 50);
+    }
+
+    placeNewOrganizationMarker();
+}
+
+function placeNewOrganizationMarker() {
+    if (!newOrgMap || !organizationLocation) return;
+    if (newOrgMarker) newOrgMap.removeLayer(newOrgMarker);
+    newOrgMarker = L.marker([organizationLocation.lat, organizationLocation.lng], { draggable: true }).addTo(newOrgMap);
+    newOrgMarker.on('dragend', event => {
+        const position = event.target.getLatLng();
+        organizationLocation = { lat: position.lat, lng: position.lng };
+        updateNewOrganizationLocationDisplay();
+    });
+}
+
+function autofillNewOrganizationGps() {
+    requestOrganizationLocation();
+}
+
+function continueOrganizationOnboarding() {
+    document.getElementById('organization-selection-step')?.classList.add('hidden');
+    document.getElementById('new-organization-step')?.classList.remove('hidden');
+    initNewOrganizationMap();
+}
+
+async function createNewOrganization(event) {
+    event.preventDefault();
+
+    if (!pendingOrganizationRegistration || !organizationLocation) {
+        return showAlert('Missing Info', 'Please complete organization details and location first.', 'warning');
+    }
+
+    const organizationName = document.getElementById('new-org-name').value.trim();
+    const address = document.getElementById('new-org-address').value.trim();
+
+    if (!organizationName || !address) {
+        return showAlert('Missing Info', 'Please enter organization name and address.', 'warning');
+    }
+
+    try {
+        const data = await registerAccount({
+            ...pendingOrganizationRegistration,
+            name: organizationName,
+            address,
+            lat: organizationLocation.lat,
+            lng: organizationLocation.lng
+        });
+
+        pendingOrganizationRegistration = null;
+        organizationLocation = null;
+        showAuth('email-verification');
+        showAlert('Success!', data.message || 'Registration successful! Check your email to verify.', 'success');
+        updateGlobalStats();
+    } catch (err) {
+        showAlert('Registration Failed', err.message, 'error');
+    }
+}
+
 async function handleRegister() {
     const name = document.getElementById('reg-name').value;
     const email = document.getElementById('reg-email').value;
@@ -323,6 +514,20 @@ function logout() {
     currentUser = null;
     localStorage.removeItem('cached_user');
     showSection('home-section');
+}
+
+function toggleProfile() {
+    if (!currentUser) return;
+
+    const roleLabel = currentUser.role === 'organization' ? 'Organization' : 'User';
+    showAlert('Profile', `
+        <div class="text-left space-y-2">
+            <div><b>Name:</b> ${currentUser.name || 'N/A'}</div>
+            <div><b>Email:</b> ${currentUser.email || 'N/A'}</div>
+            <div><b>Phone:</b> ${currentUser.phone || 'N/A'}</div>
+            <div><b>Role:</b> ${roleLabel}</div>
+        </div>
+    `, 'info');
 }
 
 // --- Map Logic ---
