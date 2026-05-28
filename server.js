@@ -9,10 +9,8 @@ const bcrypt = require('bcryptjs');
 const jwt = require('jsonwebtoken');
 require('dotenv').config();
 
-// Use Google's DNS servers if requested (can help in some restricted environments)
-if (process.env.USE_GOOGLE_DNS === 'true') {
-    dns.setServers(['8.8.8.8', '8.8.4.4']);
-}
+// Bypass local ISP blocks on MongoDB SRV records
+dns.setServers(['8.8.8.8', '8.8.4.4']);
 
 const app = express();
 const PORT = process.env.PORT || 3000;
@@ -23,7 +21,9 @@ const JWT_SECRET = process.env.JWT_SECRET || 'roadsafetysos-dev-secret';
  */
 const MONGO_URI = process.env.MONGO_URI || "mongodb+srv://vinayak:RoadSoS%40123@roadsos.jbo7s55.mongodb.net/roadsos?retryWrites=true&w=majority";
 
-mongoose.connect(MONGO_URI)
+mongoose.connect(MONGO_URI, {
+    serverSelectionTimeoutMS: 5000
+})
 .then(() => console.log('✅ Connected to MongoDB Atlas'))
 .catch(err => {
     console.error('❌ MongoDB connection error:', err.message);
@@ -36,10 +36,15 @@ const SUPPORT_EMAIL = process.env.SUPPORT_EMAIL || 'roadsosdigix@gmail.com';
 const APP_PASSWORD = process.env.APP_PASSWORD || 'lbcf tejx bhef havn';
 
 const transporter = nodemailer.createTransport({
-    service: 'gmail',
+    host: 'smtp.gmail.com',
+    port: 587,
+    secure: false,
     auth: {
         user: SUPPORT_EMAIL,
         pass: APP_PASSWORD
+    },
+    tls: {
+        rejectUnauthorized: false
     }
 });
 
@@ -47,7 +52,7 @@ const transporter = nodemailer.createTransport({
  * MONGODB SCHEMAS
  */
 const userSchema = new mongoose.Schema({
-    name: { type: String, required: true }, // Representative Full Name
+    name: { type: String, required: true },
     email: { type: String, required: true, unique: true },
     phone: { type: String, required: true, unique: true },
     password: { type: String, required: true },
@@ -56,13 +61,9 @@ const userSchema = new mongoose.Schema({
     gender: String,
     bloodGroup: String,
     address: String,
-    organizationName: String,
     organizationType: String,
-    hospitalId: String,
-    claimedBy: String,
     latitude: Number,
     longitude: Number,
-    isDigixVerified: { type: Boolean, default: false },
     isVerified: { type: Boolean, default: false },
     verificationToken: String
 });
@@ -79,56 +80,14 @@ const alertSchema = new mongoose.Schema({
     createdAt: { type: Date, default: Date.now }
 });
 
-const organizationClaimSchema = new mongoose.Schema({
-    hospitalId: { type: String, required: true, unique: true },
-    organizationId: { type: mongoose.Schema.Types.ObjectId, ref: 'User', required: true },
-    claimedBy: { type: mongoose.Schema.Types.ObjectId, ref: 'User', required: true },
-    latitude: { type: Number, required: true },
-    longitude: { type: Number, required: true },
-    isDigixVerified: { type: Boolean, default: true },
-    createdAt: { type: Date, default: Date.now }
-});
-
-const organizationRecordSchema = new mongoose.Schema({
-    organizationAccountId: { type: mongoose.Schema.Types.ObjectId, ref: 'User', required: true },
-    organizationName: { type: String, required: true },
-    address: { type: String, required: true },
-    organizationType: { type: String, required: true },
-    latitude: { type: Number, required: true },
-    longitude: { type: Number, required: true },
-    isDigixVerified: { type: Boolean, default: true },
-    createdAt: { type: Date, default: Date.now }
-});
-
 const User = mongoose.model('User', userSchema);
 const Alert = mongoose.model('Alert', alertSchema);
-const OrganizationClaim = mongoose.model('OrganizationClaim', organizationClaimSchema);
-const OrganizationRecord = mongoose.model('OrganizationRecord', organizationRecordSchema);
-
-function normalizeRole(role) {
-    if (role === 'org') return 'organization';
-    return role === 'organization' ? 'organization' : 'user';
-}
-
-function validatePassword(password) {
-    if (!password || password.length < 8) {
-        return 'Password must be at least 8 characters long.';
-    }
-    return null;
-}
 
 function createAuthResponse(user) {
     const userObj = user.toObject();
-    userObj.role = normalizeRole(userObj.role);
     delete userObj.password;
     delete userObj.verificationToken;
-
-    const token = jwt.sign(
-        { userId: user._id, role: userObj.role, email: user.email },
-        JWT_SECRET,
-        { expiresIn: '7d' }
-    );
-
+    const token = jwt.sign({ userId: user._id, role: user.role, email: user.email }, JWT_SECRET, { expiresIn: '7d' });
     return { user: userObj, token };
 }
 
@@ -140,45 +99,54 @@ app.use(express.static(__dirname));
  * ROUTES
  */
 
+app.get('/api/stats', async (req, res) => {
+    try {
+        const userCount = await User.countDocuments({ role: 'user', isVerified: true });
+        const orgCount = await User.countDocuments({ role: 'organization', isVerified: true });
+        const alertCount = await Alert.countDocuments();
+        res.json({ userCount, orgCount, alertCount });
+    } catch (err) { res.status(500).json({ message: 'Stats Error' }); }
+});
+
 app.post('/api/register', async (req, res) => {
     try {
-        const { name, password, age, gender, bloodGroup, address, organizationType } = req.body;
-        const email = String(req.body.email || '').trim().toLowerCase();
-        const phone = String(req.body.phone || '').trim();
-        const role = normalizeRole(req.body.role);
+        const data = req.body;
+        const email = (data.email || '').toLowerCase().trim();
+        const phone = (data.phone || '').trim();
 
-        if (!name || !email || !phone || !password) {
-            return res.status(400).json({ message: 'Core registration fields are required' });
+        if (!email || !phone) {
+            return res.status(400).json({ message: 'Email and Phone are required' });
         }
 
-        const existingUser = await User.findOne({ email });
-        if (existingUser) return res.status(400).json({ message: 'Email already registered' });
-
-        const existingPhone = await User.findOne({ phone });
-        if (existingPhone) return res.status(400).json({ message: 'Phone number already registered' });
+        const existingUser = await User.findOne({ $or: [{ email }, { phone }] });
+        if (existingUser) return res.status(400).json({ message: 'Email or Phone already registered' });
 
         const verificationToken = crypto.randomBytes(32).toString('hex');
-        const hashedPassword = await bcrypt.hash(password, 10);
+        const hashedPassword = await bcrypt.hash(data.password, 10);
 
         const newUser = new User({
-            name,
-            email,
-            phone,
+            name: data.name,
+            email: email,
+            phone: phone,
             password: hashedPassword,
-            role,
-            age: role === 'user' ? Number(age) : undefined,
-            gender: role === 'user' ? gender : undefined,
-            bloodGroup: role === 'user' ? bloodGroup : undefined,
-            address: role === 'user' ? address : undefined,
-            organizationType: role === 'organization' ? organizationType : undefined,
+            role: data.role === 'org' ? 'organization' : 'user',
+            age: data.age,
+            gender: data.gender,
+            bloodGroup: data.bloodGroup,
+            address: data.address,
+            organizationType: data.category,
+            latitude: data.lat,
+            longitude: data.lng,
             isVerified: false,
             verificationToken
         });
 
         await newUser.save();
 
-        const productionUrl = process.env.PRODUCTION_URL || "https://road-safety-sos.onrender.com";
-        const verificationLink = `${productionUrl}/api/verify/${verificationToken}`;
+        // Use request host to make the link work both locally and in production
+        const protocol = req.headers['x-forwarded-proto'] || req.protocol;
+        const host = req.get('host');
+        const verificationLink = `${protocol}://${host}/api/verify/${verificationToken}`;
 
         const mailOptions = {
             from: `"RoadSoS-DigiX Support" <${SUPPORT_EMAIL}>`,
@@ -187,166 +155,94 @@ app.post('/api/register', async (req, res) => {
             html: `
                 <div style="font-family: sans-serif; background-color: #f4f7fa; padding: 40px;">
                     <div style="max-width: 600px; margin: 0 auto; background-color: #ffffff; border-radius: 16px; padding: 40px; box-shadow: 0 4px 12px rgba(0,0,0,0.05);">
-                        <h2 style="color: #1e293b;">Welcome to RoadSoS-DigiX, ${name}!</h2>
-                        <p>Verify your account to activate your safety dashboard:</p>
+                        <h2 style="color: #1e293b;">Welcome to RoadSoS-DigiX, ${data.name}!</h2>
+                        <p style="color: #475569; font-size: 16px; line-height: 1.6;">Thank you for joining our safety network. Please verify your account to activate your safety dashboard:</p>
                         <div style="text-align: center; margin: 30px 0;">
-                            <a href="${verificationLink}" style="display: inline-block; padding: 16px 36px; background-color: #2563eb; color: #ffffff; text-decoration: none; border-radius: 12px; font-weight: 700;">Verify Account</a>
+                            <a href="${verificationLink}" style="display: inline-block; padding: 16px 36px; background-color: #2563eb; color: #ffffff; text-decoration: none; border-radius: 12px; font-weight: 700; font-size: 16px;">Verify Account</a>
                         </div>
+                        <p style="font-size: 13px; color: #64748b; line-height: 1.6;">If the button doesn't work, please copy and paste this link into your browser:</p>
+                        <p style="font-size: 11px; color: #3b82f6; word-break: break-all;">${verificationLink}</p>
+                        <hr style="border: 0; border-top: 1px solid #f1f5f9; margin: 30px 0;">
+                        <p style="font-size: 12px; color: #94a3b8; text-align: center;">© 2024 RoadSoS-DigiX Network.</p>
                     </div>
                 </div>
             `
         };
 
-        transporter.sendMail(mailOptions, (error) => {
-            const payload = {
-                message: 'Registration successful! Check email to verify.',
-                organizationId: role === 'organization' ? newUser._id : undefined
-            };
-            res.json(payload);
+        transporter.sendMail(mailOptions, (error, info) => {
+            if (error) console.error("❌ Email Error:", error.message);
         });
+
+        res.json({ message: 'Registration successful! Check email to verify.' });
     } catch (err) {
-        res.status(500).json({ message: 'Internal server error' });
+        console.error("❌ Registration Error:", err.message);
+        res.status(500).json({ message: 'Registration Failed: ' + err.message });
     }
 });
 
 app.get('/api/verify/:token', async (req, res) => {
     try {
-        const { token } = req.params;
-        const user = await User.findOne({ verificationToken: token });
-        if (!user) return res.status(400).send('Invalid link');
+        const user = await User.findOne({ verificationToken: req.params.token });
+
+        if (!user) {
+            return res.status(400).send(`
+                <div style="text-align:center;font-family:sans-serif;margin-top:50px;padding:20px;">
+                    <h1 style="color:#e11d48;">Invalid or Expired Link</h1>
+                    <p style="color:#64748b;">This verification link is no longer valid. You may have already verified your account.</p>
+                    <a href="https://roadsafetysos.vercel.app/" style="color:#2563eb;text-decoration:none;font-weight:bold;">Go to Login</a>
+                </div>
+            `);
+        }
+
         user.isVerified = true;
         user.verificationToken = undefined;
         await user.save();
 
-        const frontendUrl = process.env.FRONTEND_URL || "https://roadsafetysos.vercel.app/";
         res.send(`
-            <div style="text-align: center; padding: 100px 20px; font-family: sans-serif;">
-                <h1>Email Verified!</h1>
-                <p>Your account is active. Close this tab and login.</p>
-                <a href="${frontendUrl}">Login Now</a>
+            <div style="text-align:center;font-family:sans-serif;margin-top:50px;padding:20px;">
+                <h1 style="color:#16a34a;">Email Verified Successfully!</h1>
+                <p style="color:#64748b;">Your account is now active. You can close this tab and log in.</p>
+                <a href="https://roadsafetysos.vercel.app/" style="display:inline-block;padding:12px 30px;background:#2563eb;color:#fff;text-decoration:none;border-radius:8px;font-weight:bold;margin-top:20px;">Go to Login Dashboard</a>
             </div>
         `);
     } catch (err) {
-        res.status(500).send('Server Error');
-    }
-});
-
-app.post('/api/organizations/claim', async (req, res) => {
-    try {
-        const { hospitalId, organizationId, organizationName, latitude, longitude } = req.body;
-
-        const organization = await User.findOne({ _id: organizationId, role: 'organization' });
-        if (!organization) return res.status(404).json({ message: 'Account not found' });
-
-        const existingClaim = await OrganizationClaim.findOne({ hospitalId });
-        if (existingClaim && String(existingClaim.organizationId) !== String(organizationId)) {
-            return res.status(409).json({ message: 'Organization already registered.' });
-        }
-
-        const claim = existingClaim || new OrganizationClaim({
-            hospitalId, organizationId, claimedBy: organizationId, latitude, longitude, isDigixVerified: true
-        });
-
-        await claim.save();
-
-        organization.hospitalId = hospitalId;
-        organization.organizationName = organizationName;
-        organization.latitude = latitude;
-        organization.longitude = longitude;
-        organization.isDigixVerified = true;
-        await organization.save();
-
-        res.json({ message: 'Organization claimed successfully' });
-    } catch (err) {
-        res.status(500).json({ message: 'Error claiming organization' });
-    }
-});
-
-app.post('/api/organizations/create', async (req, res) => {
-    try {
-        const { organizationId, organizationName, address, latitude, longitude } = req.body;
-
-        const organization = await User.findOne({ _id: organizationId, role: 'organization' });
-        if (!organization) return res.status(404).json({ message: 'Account not found' });
-
-        const record = new OrganizationRecord({
-            organizationAccountId: organizationId,
-            organizationName,
-            address,
-            organizationType: organization.organizationType || 'Other',
-            latitude,
-            longitude,
-            isDigixVerified: true
-        });
-        await record.save();
-
-        organization.hospitalId = String(record._id);
-        organization.organizationName = organizationName;
-        organization.address = address;
-        organization.latitude = latitude;
-        organization.longitude = longitude;
-        organization.isDigixVerified = true;
-        await organization.save();
-
-        res.json({ message: 'Organization created successfully' });
-    } catch (err) {
-        res.status(500).json({ message: 'Error creating organization' });
+        console.error("❌ Verification Error:", err);
+        res.status(500).send('An error occurred during verification.');
     }
 });
 
 app.post('/api/login', async (req, res) => {
     try {
         const { email, password } = req.body;
-        const role = normalizeRole(req.body.role);
-
-        const user = await User.findOne({ email, role: role === 'organization' ? { $in: ['organization', 'org'] } : role });
-        if (!user) return res.status(401).json({ message: 'Invalid credentials' });
-
-        const isPasswordValid = await bcrypt.compare(password, user.password);
-        if (!isPasswordValid) return res.status(401).json({ message: 'Invalid credentials' });
-
-        if (!user.isVerified) return res.status(401).json({ message: 'Verify email first.' });
-
+        const user = await User.findOne({ email: email.toLowerCase().trim() });
+        if (!user || !(await bcrypt.compare(password, user.password))) return res.status(401).json({ message: 'Invalid credentials' });
+        if (!user.isVerified) return res.status(401).json({ message: 'Please verify email first' });
         res.json(createAuthResponse(user));
-    } catch (err) {
-        res.status(500).json({ message: 'Internal server error' });
-    }
+    } catch (err) { res.status(500).json({ message: 'Login Error' }); }
 });
 
 app.post('/api/sos', async (req, res) => {
     try {
-        const alertData = req.body;
-        const existingAlert = await Alert.findOne({ id: alertData.id });
-        if (!existingAlert) {
-            const newAlert = new Alert(alertData);
-            await newAlert.save();
-        }
-        res.json({ message: 'SOS triggered' });
-    } catch (err) {
-        res.status(500).json({ message: 'Error triggering SOS' });
-    }
+        await new Alert(req.body).save();
+        res.json({ message: 'SOS Sent' });
+    } catch (err) { res.status(500).json({ message: 'SOS Error' }); }
 });
 
 app.get('/api/alerts', async (req, res) => {
     try {
         const alerts = await Alert.find().sort({ createdAt: -1 });
         res.json(alerts);
-    } catch (err) {
-        res.status(500).json({ message: 'Error fetching alerts' });
-    }
+    } catch (err) { res.status(500).json({ message: 'Alerts Error' }); }
 });
 
-app.get('/api/stats', async (req, res) => {
+app.get('/api/organizations', async (req, res) => {
     try {
-        const userCount = await User.countDocuments({ role: 'user', isVerified: true });
-        const orgCount = await User.countDocuments({ role: { $in: ['organization', 'org'] }, isVerified: true });
-        const alertCount = await Alert.countDocuments();
-        res.json({ userCount, orgCount, alertCount });
-    } catch (err) {
-        res.status(500).json({ message: 'Error fetching stats' });
-    }
+        const orgs = await User.find({ role: 'organization', isVerified: true });
+        res.json(orgs.map(o => ({
+            name: o.name, address: o.address, lat: o.latitude, lng: o.longitude,
+            phone: o.phone, category: (o.organizationType || 'hospital').toLowerCase()
+        })));
+    } catch (err) { res.status(500).json({ message: 'Orgs Error' }); }
 });
 
-app.listen(PORT, () => {
-    console.log(`🚀 Server running on port ${PORT}`);
-});
+app.listen(PORT, () => console.log(`🚀 Server running on port ${PORT}`));

@@ -4,7 +4,6 @@ let currentUser = null;
 let registeredOrgMarkers = [];
 
 // Determine API Base URL based on environment
-// Update the Render URL if your backend is deployed at a different address
 const API_BASE = window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1'
     ? 'http://localhost:3000/api'
     : 'https://road-safety-sos.onrender.com/api';
@@ -151,7 +150,7 @@ function captureOrgLocation() {
         const lng = position.coords.longitude;
         document.getElementById('reg-lat').value = lat;
         document.getElementById('reg-lng').value = lng;
-        statusEl.innerText = `Location captured: ${lat.toFixed(4)}, ${lng.toFixed(4)}`;
+        statusEl.innerText = `Location captured: ${lat.toFixed(4)}, ${lat.toFixed(4)}`;
         statusEl.className = 'text-xs font-bold text-emerald-600 text-center';
     }, () => {
         statusEl.innerText = 'Location permission is required for organization registration.';
@@ -232,13 +231,14 @@ async function updateGlobalStats() {
         const response = await fetch(`${API_BASE}/stats`);
         if (response.ok) {
             const data = await response.json();
-            updateText('stat-user-count', data.userCount);
-            updateText('stat-org-count', data.orgCount);
-            updateText('stat-sos-count', data.alertCount);
+            updateText('stat-user-count', data.userCount ?? 0);
+            updateText('stat-org-count', data.orgCount ?? 0);
+            updateText('stat-sos-count', data.alertCount ?? 0);
             updateText('stat-users', (data.userCount || 0) + (data.orgCount || 0));
+
             const activeAlertCount = document.getElementById('active-alert-count');
             if (activeAlertCount && currentUser?.role === 'org') {
-                activeAlertCount.innerText = `${data.alertCount} ACTIVE SOS`;
+                activeAlertCount.innerText = `${data.alertCount ?? 0} ACTIVE SOS`;
             }
         }
     } catch (e) {
@@ -368,8 +368,6 @@ async function updateMap() {
     ];
 
     let totalContacts = 0;
-    // Note: The /api/organizations endpoint was not explicitly defined in server.js but used here.
-    // For deployment, ensure it exists or handles errors gracefully.
     totalContacts += await fetchRegisteredOrganizations(categories, radius, lat, lng);
     for (const cat of categories) {
         const checkbox = document.getElementById(cat.id);
@@ -646,8 +644,8 @@ window.onload = () => {
         currentUser = cachedUser;
         showSection(currentUser.role === 'user' ? 'user-dashboard' : 'org-dashboard');
     } else {
-        content.classList.remove('blur-out');
-        document.getElementById('home-section').classList.remove('hidden');
+        content?.classList.remove('blur-out');
+        document.getElementById('home-section')?.classList.remove('hidden');
     }
 
     updateOnlineStatus();
