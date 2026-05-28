@@ -22,7 +22,7 @@ const JWT_SECRET = process.env.JWT_SECRET || 'roadsafetysos-dev-secret';
 const MONGO_URI = process.env.MONGO_URI || "mongodb+srv://vinayak:RoadSoS%40123@roadsos.jbo7s55.mongodb.net/roadsos?retryWrites=true&w=majority";
 
 mongoose.connect(MONGO_URI, {
-    serverSelectionTimeoutMS: 5000
+    serverSelectionTimeoutMS: 10000 // Increased timeout for cloud DB
 })
 .then(() => console.log('✅ Connected to MongoDB Atlas'))
 .catch(err => {
@@ -35,29 +35,22 @@ mongoose.connect(MONGO_URI, {
 const SUPPORT_EMAIL = process.env.SUPPORT_EMAIL || 'roadsosdigix@gmail.com';
 const APP_PASSWORD = process.env.APP_PASSWORD || 'lbcf tejx bhef havn';
 
-// Render and other cloud providers often block port 587 or default SMTP ports.
-// Using explicit host and port 465 (SSL) is usually more reliable on these platforms.
 const transporter = nodemailer.createTransport({
     host: 'smtp.gmail.com',
     port: 465,
-    secure: true, // Use SSL
+    secure: true,
     auth: {
         user: SUPPORT_EMAIL,
         pass: APP_PASSWORD
     },
-    // Increased timeout settings to handle slow cloud network connections
     connectionTimeout: 10000,
     greetingTimeout: 10000,
     socketTimeout: 10000
 });
 
-// Verify email connection on startup
-transporter.verify((error, success) => {
-    if (error) {
-        console.error("❌ Email transporter error:", error.message);
-    } else {
-        console.log("✅ Email server is ready to send messages");
-    }
+transporter.verify((error) => {
+    if (error) console.error("❌ Email transporter error:", error.message);
+    else console.log("✅ Email server is ready");
 });
 
 /**
@@ -102,6 +95,12 @@ function createAuthResponse(user) {
     const token = jwt.sign({ userId: user._id, role: user.role, email: user.email }, JWT_SECRET, { expiresIn: '7d' });
     return { user: userObj, token };
 }
+
+// Request Logger Middleware
+app.use((req, res, next) => {
+    console.log(`[${new Date().toLocaleTimeString()}] ${req.method} ${req.url}`);
+    next();
+});
 
 app.use(cors());
 app.use(bodyParser.json());
@@ -154,9 +153,12 @@ app.post('/api/register', async (req, res) => {
 
         await newUser.save();
 
+        // Send response immediately to frontend
+        res.json({ message: 'Registration successful! Check your email for verification.' });
+
+        // Handle email asynchronously so it doesn't block the response
         const protocol = req.headers['x-forwarded-proto'] || req.protocol;
         const host = req.get('host');
-        // On Render, we want to ensure we use the Production URL for the link if available
         const baseUrl = process.env.PRODUCTION_URL || `${protocol}://${host}`;
         const verificationLink = `${baseUrl}/api/verify/${verificationToken}`;
 
@@ -176,19 +178,16 @@ app.post('/api/register', async (req, res) => {
             `
         };
 
-        // Send email and log result
         transporter.sendMail(mailOptions, (error, info) => {
-            if (error) {
-                console.error("❌ Email Error:", error.message);
-            } else {
-                console.log("✅ Email sent: " + info.response);
-            }
+            if (error) console.error("❌ Email Error:", error.message);
+            else console.log("✅ Email sent: " + info.response);
         });
 
-        res.json({ message: 'Registration successful! Check your email for verification.' });
     } catch (err) {
         console.error("❌ Registration Error:", err.message);
-        res.status(500).json({ message: 'Registration Failed: ' + err.message });
+        if (!res.headersSent) {
+            res.status(500).json({ message: 'Registration Failed: ' + err.message });
+        }
     }
 });
 

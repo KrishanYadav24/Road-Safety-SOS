@@ -7,9 +7,11 @@ let organizationLocation = null;
 let newOrgMap = null;
 let newOrgMarker = null;
 
-// Use relative path for API calls since the server serves the frontend
-// This ensures it works on both localhost and any deployed domain (Render, Vercel, etc.)
-const API_BASE = '/api';
+// Robust API Base URL detection
+// Localhost uses absolute URL, while Deployed uses relative path to avoid host/protocol issues.
+const API_BASE = (window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1')
+    ? 'http://localhost:3000/api'
+    : '/api';
 
 // Persistence Keys
 const SOS_QUEUE_KEY = 'roadsafetysos_sos_queue';
@@ -71,7 +73,6 @@ function closeModal() {
 function showSection(sectionId) {
     const content = document.getElementById('main-content');
 
-    // Start transition
     content.classList.add('blur-out');
 
     setTimeout(() => {
@@ -105,8 +106,6 @@ function showSection(sectionId) {
         }
 
         updateOnlineStatus();
-
-        // End transition
         content.classList.remove('blur-out');
     }, 200);
 }
@@ -153,7 +152,7 @@ async function handleUserRegistration(event) {
     };
 
     if (!payload.name || !payload.email || !payload.phone || !payload.password) {
-        return showAlert('Missing Info', 'Please fill name, email, phone, and password.', 'warning');
+        return showAlert('Missing Info', 'Please fill all mandatory fields.', 'warning');
     }
 
     try {
@@ -162,7 +161,9 @@ async function handleUserRegistration(event) {
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify(payload)
         });
+
         const data = await response.json();
+
         if (response.ok) {
             showAuth('email-verification');
             showAlert('Success!', data.message || 'Registration successful!', 'success');
@@ -171,7 +172,8 @@ async function handleUserRegistration(event) {
             showAlert('Registration Failed', data.message, 'error');
         }
     } catch (err) {
-        showAlert('Registration Failed', 'Could not connect to server.', 'error');
+        console.error("Detailed Registration Error:", err);
+        showAlert('Registration Failed', 'Could not connect to server. Please check your internet connection.', 'error');
     }
 }
 
@@ -190,7 +192,7 @@ function handleOrganizationRegistration(event) {
     if (!pendingOrganizationRegistration.name || !pendingOrganizationRegistration.email ||
         !pendingOrganizationRegistration.phone || !pendingOrganizationRegistration.password ||
         !pendingOrganizationRegistration.category) {
-        return showAlert('Missing Info', 'Please fill all organization registration fields.', 'warning');
+        return showAlert('Missing Info', 'Please fill all organization fields.', 'warning');
     }
 
     showAuth('organization-onboarding');
@@ -214,7 +216,7 @@ function requestOrganizationLocation() {
         updateNewOrganizationLocationDisplay();
         initNewOrganizationMap();
     }, () => {
-        showAlert('Location Denied', 'Please allow location access to register your organization.', 'warning');
+        showAlert('Location Denied', 'Location access is required for organization registration.', 'warning');
     }, { enableHighAccuracy: true });
 }
 
@@ -348,21 +350,22 @@ async function updateMap() {
     const lng = userLocation.lng;
 
     const categories = [
-        { id: 'check-hospital', type: 'Hospital', query: `nwr["amenity"="hospital"](around:${radius},${lat},${lng});`, color: '#dc2626', icon: 'fa-hospital' },
-        { id: 'check-police', type: 'Police', query: `nwr["amenity"="police"](around:${radius},${lat},${lng});`, color: '#1e40af', icon: 'fa-shield-alt' },
-        { id: 'check-trauma', type: 'Trauma Centre', query: `(nwr["amenity"="hospital"]["emergency"="yes"](around:${radius},${lat},${lng}); nwr["emergency"="yes"](around:${radius},${lat},${lng}); nwr["name"~"Trauma",i](around:${radius},${lat},${lng}););`, color: '#991b1b', icon: 'fa-ambulance' },
-        { id: 'check-towing', type: 'Repair/Towing', query: `(nwr["shop"="car_repair"](around:${radius},${lat},${lng}); nwr["shop"="tyres"](around:${radius},${lat},${lng}); nwr["amenity"="car_repair"](around:${radius},${lat},${lng}); nwr["name"~"Towing",i](around:${radius},${lat},${lng}); nwr["name"~"Puncture",i](around:${radius},${lat},${lng}););`, color: '#92400e', icon: 'fa-tools' },
-        { id: 'check-clinics', type: 'Clinic', query: `nwr["amenity"="clinic"](around:${radius},${lat},${lng});`, color: '#059669', icon: 'fa-clinic-medical' }
+        { id: 'check-hospital', type: 'Hospital', query: `nwr["amenity"="hospital"](around:${radius},${lat},${lng});`, color: '#dc2626', icon: 'fa-h-square' },
+        { id: 'check-police', type: 'Police', query: `nwr["amenity"="police"](around:${radius},${lat},${lng});`, color: '#1e40af', icon: 'fa-shield-halved' },
+        { id: 'check-trauma', type: 'Trauma Centre', query: `(nwr["amenity"="hospital"]["emergency"="yes"](around:${radius},${lat},${lng}); nwr["emergency"="yes"](around:${radius},${lat},${lng}););`, color: '#991b1b', icon: 'fa-truck-medical' },
+        { id: 'check-towing', type: 'Repair/Towing', query: `(nwr["shop"="car_repair"](around:${radius},${lat},${lng}); nwr["amenity"="car_repair"](around:${radius},${lat},${lng}););`, color: '#92400e', icon: 'fa-wrench' },
+        { id: 'check-clinics', type: 'Clinic', query: `nwr["amenity"="clinic"](around:${radius},${lat},${lng});`, color: '#059669', icon: 'fa-house-medical' }
     ];
 
     let totalContacts = 0;
 
-    // Fetch from registered organizations first
-    totalContacts += await fetchRegisteredOrganizations(radius, lat, lng);
+    // Fetch from registered organizations
+    totalContacts += await fetchRegisteredOrganizations(radius, lat, lng, categories);
 
     // Fetch from Overpass API for each checked category
     for (const cat of categories) {
-        if (document.getElementById(cat.id).checked) {
+        const checkbox = document.getElementById(cat.id);
+        if (checkbox && checkbox.checked) {
             const count = await fetchResources(cat);
             totalContacts += count;
         }
@@ -372,7 +375,7 @@ async function updateMap() {
     if (countEl) countEl.innerText = totalContacts;
 }
 
-async function fetchRegisteredOrganizations(radius, lat, lng) {
+async function fetchRegisteredOrganizations(radius, lat, lng, categories) {
     try {
         const response = await fetch(`${API_BASE}/organizations`);
         if (response.ok) {
@@ -383,22 +386,21 @@ async function fetchRegisteredOrganizations(radius, lat, lng) {
 
     let count = 0;
     registeredOrgCache.forEach(org => {
-        // Map org types to checkbox IDs
-        const typeMap = {
-            'hospital': 'check-hospital',
-            'ambulance service': 'check-trauma', // Mapping ambulance to trauma for now
-            'clinic': 'check-clinics',
-            'police': 'check-police',
-            'repair': 'check-towing'
-        };
+        const typeKey = (org.category || '').toLowerCase();
+        let checkboxId = 'check-hospital';
 
-        const checkboxId = typeMap[(org.category || '').toLowerCase()] || 'check-hospital';
+        if (typeKey.includes('police')) checkboxId = 'check-police';
+        else if (typeKey.includes('ambulance') || typeKey.includes('emergency')) checkboxId = 'check-trauma';
+        else if (typeKey.includes('repair') || typeKey.includes('towing')) checkboxId = 'check-towing';
+        else if (typeKey.includes('clinic')) checkboxId = 'check-clinics';
+
         const checkbox = document.getElementById(checkboxId);
+        const catObj = categories.find(c => c.id === checkboxId) || categories[0];
 
         if (checkbox && checkbox.checked) {
             const dist = getDistance(lat, lng, org.lat, org.lng);
             if (dist <= radius) {
-                renderMarker({ lat: org.lat, lon: org.lng, tags: { name: org.name, phone: org.phone } }, { type: org.category, color: '#2563eb', icon: 'fa-building-circle-check' });
+                renderMarker({ lat: org.lat, lon: org.lng, tags: { name: org.name, phone: org.phone } }, catObj);
                 count++;
             }
         }
@@ -440,7 +442,7 @@ function renderMarker(el, cat) {
     const name = el.tags.name || `Unnamed ${cat.type}`;
     const phone = el.tags.phone || 'N/A';
     L.marker([lat, lon], { icon: markerIcon }).addTo(map)
-        .bindPopup(`<b>${name}</b><br>${cat.type}<br>Phone: ${phone}`);
+        .bindPopup(`<b>${name}</b><br><span class="text-[10px] font-bold text-slate-500">${cat.type}</span><br><a href="tel:${phone}" class="text-blue-600 font-bold underline">${phone}</a>`);
 }
 
 // --- Global Stats ---
@@ -461,9 +463,7 @@ function updateText(id, text) {
     if (el) el.innerText = text;
 }
 
-function updateOnlineStatus() {
-    // Basic implementation
-}
+function updateOnlineStatus() {}
 
 // --- SOS Logic ---
 async function triggerSOS() {
