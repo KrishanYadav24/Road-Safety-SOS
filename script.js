@@ -4,6 +4,7 @@ let currentUser = null;
 let registeredOrgMarkers = [];
 
 // Determine API Base URL based on environment
+// Update the Render URL if your backend is deployed at a different address
 const API_BASE = window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1'
     ? 'http://localhost:3000/api'
     : 'https://road-safety-sos.onrender.com/api';
@@ -367,6 +368,8 @@ async function updateMap() {
     ];
 
     let totalContacts = 0;
+    // Note: The /api/organizations endpoint was not explicitly defined in server.js but used here.
+    // For deployment, ensure it exists or handles errors gracefully.
     totalContacts += await fetchRegisteredOrganizations(categories, radius, lat, lng);
     for (const cat of categories) {
         const checkbox = document.getElementById(cat.id);

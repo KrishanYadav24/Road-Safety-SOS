@@ -9,8 +9,10 @@ const bcrypt = require('bcryptjs');
 const jwt = require('jsonwebtoken');
 require('dotenv').config();
 
-// Force DNS to use Google's servers to bypass local DNS restrictions
-dns.setServers(['8.8.8.8', '8.8.4.4']);
+// Use Google's DNS servers if requested (can help in some restricted environments)
+if (process.env.USE_GOOGLE_DNS === 'true') {
+    dns.setServers(['8.8.8.8', '8.8.4.4']);
+}
 
 const app = express();
 const PORT = process.env.PORT || 3000;
@@ -19,7 +21,7 @@ const JWT_SECRET = process.env.JWT_SECRET || 'roadsafetysos-dev-secret';
 /**
  * DATABASE CONNECTION
  */
-const MONGO_URI = "mongodb+srv://vinayak:RoadSoS%40123@roadsos.jbo7s55.mongodb.net/roadsos?retryWrites=true&w=majority";
+const MONGO_URI = process.env.MONGO_URI || "mongodb+srv://vinayak:RoadSoS%40123@roadsos.jbo7s55.mongodb.net/roadsos?retryWrites=true&w=majority";
 
 mongoose.connect(MONGO_URI)
 .then(() => console.log('✅ Connected to MongoDB Atlas'))
@@ -30,8 +32,8 @@ mongoose.connect(MONGO_URI)
 /**
  * EMAIL CONFIGURATION
  */
-const SUPPORT_EMAIL = 'roadsosdigix@gmail.com';
-const APP_PASSWORD = 'lbcf tejx bhef havn';
+const SUPPORT_EMAIL = process.env.SUPPORT_EMAIL || 'roadsosdigix@gmail.com';
+const APP_PASSWORD = process.env.APP_PASSWORD || 'lbcf tejx bhef havn';
 
 const transporter = nodemailer.createTransport({
     service: 'gmail',
@@ -175,7 +177,7 @@ app.post('/api/register', async (req, res) => {
 
         await newUser.save();
 
-        const productionUrl = "https://road-safety-sos.onrender.com";
+        const productionUrl = process.env.PRODUCTION_URL || "https://road-safety-sos.onrender.com";
         const verificationLink = `${productionUrl}/api/verify/${verificationToken}`;
 
         const mailOptions = {
@@ -215,11 +217,13 @@ app.get('/api/verify/:token', async (req, res) => {
         user.isVerified = true;
         user.verificationToken = undefined;
         await user.save();
+
+        const frontendUrl = process.env.FRONTEND_URL || "https://roadsafetysos.vercel.app/";
         res.send(`
             <div style="text-align: center; padding: 100px 20px; font-family: sans-serif;">
                 <h1>Email Verified!</h1>
                 <p>Your account is active. Close this tab and login.</p>
-                <a href="https://roadsafetysos.vercel.app/">Login Now</a>
+                <a href="${frontendUrl}">Login Now</a>
             </div>
         `);
     } catch (err) {
@@ -344,5 +348,5 @@ app.get('/api/stats', async (req, res) => {
 });
 
 app.listen(PORT, () => {
-    console.log(`🚀 Server running at http://localhost:${PORT}`);
+    console.log(`🚀 Server running on port ${PORT}`);
 });
