@@ -1,3 +1,4 @@
+require('dotenv').config();
 const express = require('express');
 const cors = require('cors');
 const bodyParser = require('body-parser');
@@ -55,9 +56,9 @@ connectMongoDB();
 /**
  * EMAIL CONFIGURATION
  */
-const SUPPORT_EMAIL = process.env.SMTP_USER || 'roadsosdigix@gmail.com';
-const APP_PASSWORD = process.env.SMTP_PASS || 'lbcf tejx bhef havn';
-const APP_BASE_URL = process.env.PUBLIC_BASE_URL || process.env.RENDER_EXTERNAL_URL || 'http://localhost:3000';
+const SUPPORT_EMAIL = process.env.SUPPORT_EMAIL || 'roadsosdigix@gmail.com';
+const APP_PASSWORD = process.env.APP_PASSWORD || 'lbcf tejx bhef havn';
+const APP_BASE_URL = process.env.PRODUCTION_URL || process.env.RENDER_EXTERNAL_URL || 'http://localhost:3000';
 
 const transporter = nodemailer.createTransport({
     service: 'gmail',
@@ -131,7 +132,11 @@ const userSchema = new mongoose.Schema({
     password: { type: String, required: true },
     role: { type: String, enum: ['user', 'org'], default: 'user' },
     isVerified: { type: Boolean, default: false },
-    verificationToken: String
+    verificationToken: String,
+    category: { type: String },
+    address: { type: String },
+    lat: { type: Number },
+    lng: { type: Number }
 });
 
 const alertSchema = new mongoose.Schema({
@@ -160,7 +165,7 @@ app.use(express.static(__dirname));
 // Registration with Email Verification
 app.post('/api/register', async (req, res) => {
     try {
-        const { name, email, phone, password, role } = req.body;
+        const { name, email, phone, password, role, category, address, lat, lng } = req.body;
 
         const existingUser = await User.findOne({ email });
         if (existingUser) return res.status(400).json({ message: 'User already exists' });
@@ -169,6 +174,7 @@ app.post('/api/register', async (req, res) => {
 
         const newUser = new User({
             name, email, phone, password, role,
+            category, address, lat, lng,
             isVerified: false,
             verificationToken
         });
@@ -206,11 +212,12 @@ app.get('/api/verify/:token', async (req, res) => {
         user.isVerified = true;
         user.verificationToken = undefined;
         await user.save();
+        const frontendUrl = process.env.FRONTEND_URL || 'https://roadsafetysos.vercel.app/';
         res.send(`
             <div style="text-align: center; padding: 100px 20px; font-family: sans-serif;">
                 <h1>Email Verified!</h1>
                 <p>Your account is now active.</p>
-                <a href="https://roadsafetysos.vercel.app/">Login Now</a>
+                <a href="${frontendUrl}">Login Now</a>
             </div>
         `);
     } catch (err) {
@@ -277,6 +284,16 @@ app.get('/api/stats', async (req, res) => {
         res.json({ userCount, orgCount, alertCount });
     } catch (err) {
         res.status(500).json({ message: 'Error fetching stats' });
+    }
+});
+
+app.get('/api/organizations', async (req, res) => {
+    try {
+        const orgs = await User.find({ role: 'org', isVerified: true });
+        res.json(orgs);
+    } catch (err) {
+        console.error('Error fetching organizations:', err);
+        res.status(500).json({ message: 'Error fetching organizations' });
     }
 });
 

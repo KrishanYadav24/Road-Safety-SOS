@@ -2,6 +2,10 @@ let map, userMarker, orgMap, orgMarkers = [];
 let userLocation = null;
 let currentUser = null;
 let registeredOrgMarkers = [];
+let tempOrgData = null;
+let onboardingMap = null;
+let onboardingMarker = null;
+let onboardingCoords = null;
 
 // Determine API Base URL based on environment
 // Update the Render URL if your backend is deployed at a different address
@@ -110,16 +114,7 @@ function showSection(sectionId) {
 }
 
 function showAuth(view) {
-    const viewMap = {
-        login: 'login-view',
-        choice: 'auth-choice-view',
-        'user-register': 'user-register-view',
-        'organization-register': 'organization-register-view',
-        'organization-onboarding': 'organization-onboarding-view',
-        'email-verification': 'email-verification-view'
-    };
-
-    const authViews = [
+    const views = [
         'login-view',
         'auth-choice-view',
         'user-register-view',
@@ -128,14 +123,24 @@ function showAuth(view) {
         'email-verification-view'
     ];
 
-    authViews.forEach(viewId => {
-        const element = document.getElementById(viewId);
-        if (element) element.classList.add('hidden');
-    });
+    let targetId = 'login-view';
+    if (view === 'login') targetId = 'login-view';
+    else if (view === 'choice' || view === 'register') targetId = 'auth-choice-view';
+    else if (view === 'user-register') targetId = 'user-register-view';
+    else if (view === 'organization-register') targetId = 'organization-register-view';
+    else if (view === 'organization-onboarding') targetId = 'organization-onboarding-view';
+    else if (view === 'email-verification') targetId = 'email-verification-view';
 
-    const targetId = viewMap[view] || `${view}-view`;
-    const target = document.getElementById(targetId);
-    if (target) target.classList.remove('hidden');
+    views.forEach(id => {
+        const el = document.getElementById(id);
+        if (el) {
+            if (id === targetId) {
+                el.classList.remove('hidden');
+            } else {
+                el.classList.add('hidden');
+            }
+        }
+    });
 }
 
 function setRegisterRole(role) {
@@ -270,18 +275,19 @@ function updateText(id, text) {
     if (el) el.innerText = text;
 }
 
-// --- Auth ---
 async function handleUserRegistration(event) {
     event.preventDefault();
-
-    const name = document.getElementById('user-reg-name').value.trim();
-    const email = document.getElementById('user-reg-email').value.trim();
-    const phone = document.getElementById('user-reg-phone').value.trim();
+    const name = document.getElementById('user-reg-name').value;
+    const email = document.getElementById('user-reg-email').value;
+    const phone = document.getElementById('user-reg-phone').value;
     const password = document.getElementById('user-reg-password').value;
+    const age = document.getElementById('user-reg-age').value;
+    const gender = document.getElementById('user-reg-gender').value;
+    const bloodGroup = document.getElementById('user-reg-blood-group').value;
+    const address = document.getElementById('user-reg-address').value;
 
     if (!name || !email || !phone || !password) {
-        showAlert('Missing Info', 'Please fill in your name, email, phone, and password to register.', 'warning');
-        return;
+        return showAlert('Missing Info', 'Please fill all required fields.', 'warning');
     }
 
     try {
@@ -289,92 +295,144 @@ async function handleUserRegistration(event) {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({
-                name,
-                email,
-                phone,
-                password,
-                role: 'user'
+                name, email, phone, password, role: 'user',
+                age, gender, bloodGroup, address
             })
         });
-
         const data = await response.json();
         if (response.ok) {
-            document.getElementById('user-register-form').reset();
-            showAlert('Verification Email Sent', data.message || 'Check your inbox to verify your account.', 'success');
             showAuth('email-verification');
+            updateGlobalStats();
         } else {
-            showAlert('Registration Failed', data.message || 'We could not complete registration.', 'error');
+            showAlert('Registration Failed', data.message, 'error');
         }
     } catch (err) {
         showAlert('Connection Error', 'Registration requires an active internet connection.', 'error');
     }
 }
 
-async function handleOrganizationRegistration(event) {
+function handleOrganizationRegistration(event) {
     event.preventDefault();
-
-    const name = document.getElementById('organization-reg-name').value.trim();
-    const email = document.getElementById('organization-reg-email').value.trim();
-    const phone = document.getElementById('organization-reg-phone').value.trim();
+    const name = document.getElementById('organization-reg-name').value;
+    const email = document.getElementById('organization-reg-email').value;
+    const phone = document.getElementById('organization-reg-phone').value;
     const password = document.getElementById('organization-reg-password').value;
+    const category = document.getElementById('organization-reg-type').value;
 
-    if (!name || !email || !phone || !password) {
-        showAlert('Missing Info', 'Please fill in your organization representative details before continuing.', 'warning');
-        return;
+    if (!name || !email || !phone || !password || !category) {
+        return showAlert('Missing Info', 'Please fill all fields to continue onboarding.', 'warning');
     }
 
-    try {
-        const response = await fetch(`${API_BASE}/register`, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({
-                name,
-                email,
-                phone,
-                password,
-                role: 'org'
-            })
+    tempOrgData = { name, email, phone, password, category };
+    showAuth('organization-onboarding');
+}
+
+function requestOrganizationLocation() {
+    if (!navigator.geolocation) {
+        return showAlert('Error', 'Geolocation is not supported by your browser.', 'error');
+    }
+
+    showAlert('Locating...', 'Fetching your precise coordinates...', 'info');
+
+    navigator.geolocation.getCurrentPosition(position => {
+        onboardingCoords = {
+            lat: position.coords.latitude,
+            lng: position.coords.longitude
+        };
+        closeModal();
+        
+        document.getElementById('organization-location-step').classList.add('hidden');
+        document.getElementById('new-organization-step').classList.remove('hidden');
+        
+        initOnboardingMap();
+    }, () => {
+        showAlert('Location Denied', 'Please enable location access to continue onboarding.', 'error');
+    }, { enableHighAccuracy: true });
+}
+
+function initOnboardingMap() {
+    if (!onboardingCoords) return;
+    
+    document.getElementById('new-org-name').value = tempOrgData.name;
+    document.getElementById('new-org-lat-display').innerText = `Lat: ${onboardingCoords.lat.toFixed(6)}`;
+    document.getElementById('new-org-lng-display').innerText = `Lng: ${onboardingCoords.lng.toFixed(6)}`;
+
+    setTimeout(() => {
+        if (onboardingMap) {
+            onboardingMap.setView([onboardingCoords.lat, onboardingCoords.lng], 16);
+            if (onboardingMarker) onboardingMarker.setLatLng([onboardingCoords.lat, onboardingCoords.lng]);
+            return;
+        }
+
+        onboardingMap = L.map('new-org-map').setView([onboardingCoords.lat, onboardingCoords.lng], 16);
+        L.tileLayer('https://{s}.tile.osm.org/{z}/{x}/{y}.png').addTo(onboardingMap);
+
+        onboardingMarker = L.marker([onboardingCoords.lat, onboardingCoords.lng], { draggable: true }).addTo(onboardingMap);
+        
+        onboardingMarker.on('dragend', function () {
+            const position = onboardingMarker.getLatLng();
+            onboardingCoords.lat = position.lat;
+            onboardingCoords.lng = position.lng;
+            document.getElementById('new-org-lat-display').innerText = `Lat: ${onboardingCoords.lat.toFixed(6)}`;
+            document.getElementById('new-org-lng-display').innerText = `Lng: ${onboardingCoords.lng.toFixed(6)}`;
         });
 
-        const data = await response.json();
-        if (response.ok) {
-            document.getElementById('organization-register-form').reset();
-            showAlert('Verification Email Sent', data.message || 'Check your inbox to verify your organization account.', 'success');
-            showAuth('email-verification');
-        } else {
-            showAlert('Registration Failed', data.message || 'We could not complete registration.', 'error');
-        }
-    } catch (err) {
-        showAlert('Connection Error', 'Registration requires an active internet connection.', 'error');
+        onboardingMap.on('click', function (e) {
+            const position = e.latlng;
+            onboardingMarker.setLatLng(position);
+            onboardingCoords.lat = position.lat;
+            onboardingCoords.lng = position.lng;
+            document.getElementById('new-org-lat-display').innerText = `Lat: ${onboardingCoords.lat.toFixed(6)}`;
+            document.getElementById('new-org-lng-display').innerText = `Lng: ${onboardingCoords.lng.toFixed(6)}`;
+        });
+    }, 200);
+}
+
+function autofillNewOrganizationGps() {
+    if (navigator.geolocation) {
+        navigator.geolocation.getCurrentPosition(position => {
+            onboardingCoords = {
+                lat: position.coords.latitude,
+                lng: position.coords.longitude
+            };
+            onboardingMarker.setLatLng([onboardingCoords.lat, onboardingCoords.lng]);
+            onboardingMap.setView([onboardingCoords.lat, onboardingCoords.lng], 16);
+            document.getElementById('new-org-lat-display').innerText = `Lat: ${onboardingCoords.lat.toFixed(6)}`;
+            document.getElementById('new-org-lng-display').innerText = `Lng: ${onboardingCoords.lng.toFixed(6)}`;
+        }, null, { enableHighAccuracy: true });
     }
 }
 
-async function handleRegister() {
-    const name = document.getElementById('reg-name').value;
-    const email = document.getElementById('reg-email').value;
-    const phone = document.getElementById('reg-phone').value;
-    const password = document.getElementById('reg-password').value;
-    const role = document.getElementById('reg-role').value;
-    const category = document.getElementById('reg-category')?.value;
-    const address = document.getElementById('reg-address')?.value;
-    const lat = parseFloat(document.getElementById('reg-lat')?.value);
-    const lng = parseFloat(document.getElementById('reg-lng')?.value);
+async function createNewOrganization(event) {
+    event.preventDefault();
+    const name = document.getElementById('new-org-name').value;
+    const address = document.getElementById('new-org-address').value;
 
-    if (!name || !email || !password || !phone) return showAlert('Missing Info', 'Please fill all fields to create your account.', 'warning');
-    if (role === 'org' && (!category || !address || Number.isNaN(lat) || Number.isNaN(lng))) {
-        return showAlert('Organization Details Required', 'Please select a category, enter the organization address, and capture its location.', 'warning');
+    if (!name || !address || !onboardingCoords) {
+        return showAlert('Missing Info', 'Please enter your organization name, address, and confirm your location on the map.', 'warning');
     }
+
+    const payload = {
+        name,
+        email: tempOrgData.email,
+        phone: tempOrgData.phone,
+        password: tempOrgData.password,
+        role: 'org',
+        category: tempOrgData.category,
+        address: address,
+        lat: onboardingCoords.lat,
+        lng: onboardingCoords.lng
+    };
 
     try {
         const response = await fetch(`${API_BASE}/register`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ name, email, phone, password, role, category, address, lat, lng })
+            body: JSON.stringify(payload)
         });
         const data = await response.json();
         if (response.ok) {
-            showAlert('Success!', data.message || 'Registration successful! Check your email to verify.', 'success');
-            showAuth('login');
+            showAuth('email-verification');
             updateGlobalStats();
         } else {
             showAlert('Registration Failed', data.message, 'error');
@@ -387,7 +445,9 @@ async function handleRegister() {
 async function handleLogin() {
     const email = document.getElementById('login-email').value;
     const password = document.getElementById('login-password').value;
-    const role = document.getElementById('login-role').value;
+    let role = document.getElementById('login-role').value;
+
+    if (role === 'organization') role = 'org';
 
     try {
         const response = await fetch(`${API_BASE}/login`, {
