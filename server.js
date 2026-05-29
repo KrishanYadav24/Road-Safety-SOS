@@ -7,7 +7,8 @@ const nodemailer = require('nodemailer');
 const crypto = require('crypto');
 
 const app = express();
-const PORT = process.env.PORT || 3000;
+const DEFAULT_PORT = Number(process.env.PORT) || 3000;
+const MAX_PORT_RETRIES = process.env.PORT ? 0 : 10;
 
 /**
  * DATABASE CONNECTION
@@ -39,8 +40,24 @@ async function connectMongoDB(attempt = 1) {
     }
 }
 
-mongoose.connection.on('connected', () => {
+async function removeLegacyPhoneUniqueIndex() {
+    try {
+        const collection = mongoose.connection.db.collection('users');
+        const indexes = await collection.indexes();
+        const phoneIndex = indexes.find(index => index.key && index.key.phone === 1);
+
+        if (phoneIndex && phoneIndex.unique) {
+            await collection.dropIndex(phoneIndex.name);
+            console.log(`🧹 Dropped legacy unique phone index: ${phoneIndex.name}`);
+        }
+    } catch (error) {
+        console.error('⚠️ Could not remove legacy phone index:', error.message);
+    }
+}
+
+mongoose.connection.on('connected', async () => {
     console.log('🔗 MongoDB connection established');
+    await removeLegacyPhoneUniqueIndex();
 });
 
 mongoose.connection.on('disconnected', () => {
@@ -179,6 +196,9 @@ app.post('/api/register', async (req, res) => {
         const existingUser = await User.findOne({ email: normalizedEmail });
         if (existingUser) return res.status(400).json({ message: 'User already exists' });
 
+        const existingPhone = await User.findOne({ phone });
+        if (existingPhone) return res.status(400).json({ message: 'Phone number already registered' });
+
         const verificationToken = crypto.randomBytes(32).toString('hex');
 
         const newUser = new User({
@@ -204,8 +224,13 @@ app.post('/api/register', async (req, res) => {
             res.status(500).json({ message: 'Registration successful, but we couldn\'t send the verification email.' });
         }
     } catch (err) {
+<<<<<<< HEAD
         console.error('Registration Execution Failed:', err);
         res.status(500).json({ message: 'Internal server error', error: err.message });
+=======
+        console.error('Registration Error:', err);
+        res.status(500).json({ message: 'Internal server error' });
+>>>>>>> 4be7d98ab7c4efe107ba456fa586fe39035f554c
     }
 });
 
@@ -311,20 +336,31 @@ app.get('/api/organizations', async (req, res) => {
     }
 });
 
-const server = app.listen(PORT, () => {
-    console.log(`🚀 Server running at http://localhost:${PORT}`);
-});
+let server;
 
-server.on('error', (err) => {
-    if (err.code === 'EADDRINUSE') {
-        console.error(`❌ Port ${PORT} is already in use. Stop the existing server process or use another port.`);
-        process.exit(1);
-    } else {
-        console.error('❌ Server listen error:', err.message);
-        process.exit(1);
-    }
-});
+const startServer = (port = DEFAULT_PORT, retries = MAX_PORT_RETRIES) => {
+    server = app.listen(port, () => {
+        console.log(`Server running at http://localhost:${port}`);
+    });
 
+    server.on('error', (err) => {
+        if (err.code === 'EADDRINUSE' && retries > 0) {
+            const nextPort = port + 1;
+            console.warn(`Port ${port} is already in use. Trying ${nextPort}...`);
+            startServer(nextPort, retries - 1);
+            return;
+        }
+
+        if (err.code === 'EADDRINUSE') {
+            console.error(`Port ${port} is already in use. Stop the existing server process or set PORT to another port.`);
+        } else {
+            console.error('Server listen error:', err.message);
+        }
+        process.exit(1);
+    });
+};
+
+startServer();
 const shutdown = async (signal) => {
     console.log(`🛑 Received ${signal}. Shutting down server...`);
     server.close(async () => {

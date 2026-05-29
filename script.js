@@ -205,7 +205,7 @@ function handleGetStarted() {
             <li><i class="fas fa-check text-green-500 mr-2"></i> <b>Verification:</b> Secure accounts for individuals and organizations.</li>
         </ul>
     `, 'info', () => {
-        showAuth('register');
+        showAuth('choice');
         document.getElementById('auth-container').scrollIntoView();
     });
 }
