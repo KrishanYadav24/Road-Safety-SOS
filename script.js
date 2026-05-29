@@ -110,13 +110,32 @@ function showSection(sectionId) {
 }
 
 function showAuth(view) {
-    if (view === 'login') {
-        document.getElementById('login-view').classList.remove('hidden');
-        document.getElementById('register-view').classList.add('hidden');
-    } else {
-        document.getElementById('login-view').classList.add('hidden');
-        document.getElementById('register-view').classList.remove('hidden');
-    }
+    const viewMap = {
+        login: 'login-view',
+        choice: 'auth-choice-view',
+        'user-register': 'user-register-view',
+        'organization-register': 'organization-register-view',
+        'organization-onboarding': 'organization-onboarding-view',
+        'email-verification': 'email-verification-view'
+    };
+
+    const authViews = [
+        'login-view',
+        'auth-choice-view',
+        'user-register-view',
+        'organization-register-view',
+        'organization-onboarding-view',
+        'email-verification-view'
+    ];
+
+    authViews.forEach(viewId => {
+        const element = document.getElementById(viewId);
+        if (element) element.classList.add('hidden');
+    });
+
+    const targetId = viewMap[view] || `${view}-view`;
+    const target = document.getElementById(targetId);
+    if (target) target.classList.remove('hidden');
 }
 
 function setRegisterRole(role) {
@@ -181,7 +200,7 @@ function handleGetStarted() {
             <li><i class="fas fa-check text-green-500 mr-2"></i> <b>Verification:</b> Secure accounts for individuals and organizations.</li>
         </ul>
     `, 'info', () => {
-        showAuth('register');
+        showAuth('choice');
         document.getElementById('auth-container').scrollIntoView();
     });
 }
@@ -252,6 +271,84 @@ function updateText(id, text) {
 }
 
 // --- Auth ---
+async function handleUserRegistration(event) {
+    event.preventDefault();
+
+    const name = document.getElementById('user-reg-name').value.trim();
+    const email = document.getElementById('user-reg-email').value.trim();
+    const phone = document.getElementById('user-reg-phone').value.trim();
+    const password = document.getElementById('user-reg-password').value;
+
+    if (!name || !email || !phone || !password) {
+        showAlert('Missing Info', 'Please fill in your name, email, phone, and password to register.', 'warning');
+        return;
+    }
+
+    try {
+        const response = await fetch(`${API_BASE}/register`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                name,
+                email,
+                phone,
+                password,
+                role: 'user'
+            })
+        });
+
+        const data = await response.json();
+        if (response.ok) {
+            document.getElementById('user-register-form').reset();
+            showAlert('Verification Email Sent', data.message || 'Check your inbox to verify your account.', 'success');
+            showAuth('email-verification');
+        } else {
+            showAlert('Registration Failed', data.message || 'We could not complete registration.', 'error');
+        }
+    } catch (err) {
+        showAlert('Connection Error', 'Registration requires an active internet connection.', 'error');
+    }
+}
+
+async function handleOrganizationRegistration(event) {
+    event.preventDefault();
+
+    const name = document.getElementById('organization-reg-name').value.trim();
+    const email = document.getElementById('organization-reg-email').value.trim();
+    const phone = document.getElementById('organization-reg-phone').value.trim();
+    const password = document.getElementById('organization-reg-password').value;
+
+    if (!name || !email || !phone || !password) {
+        showAlert('Missing Info', 'Please fill in your organization representative details before continuing.', 'warning');
+        return;
+    }
+
+    try {
+        const response = await fetch(`${API_BASE}/register`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                name,
+                email,
+                phone,
+                password,
+                role: 'org'
+            })
+        });
+
+        const data = await response.json();
+        if (response.ok) {
+            document.getElementById('organization-register-form').reset();
+            showAlert('Verification Email Sent', data.message || 'Check your inbox to verify your organization account.', 'success');
+            showAuth('email-verification');
+        } else {
+            showAlert('Registration Failed', data.message || 'We could not complete registration.', 'error');
+        }
+    } catch (err) {
+        showAlert('Connection Error', 'Registration requires an active internet connection.', 'error');
+    }
+}
+
 async function handleRegister() {
     const name = document.getElementById('reg-name').value;
     const email = document.getElementById('reg-email').value;
