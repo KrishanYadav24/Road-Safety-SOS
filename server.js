@@ -224,13 +224,8 @@ app.post('/api/register', async (req, res) => {
             res.status(500).json({ message: 'Registration successful, but we couldn\'t send the verification email.' });
         }
     } catch (err) {
-<<<<<<< HEAD
         console.error('Registration Execution Failed:', err);
         res.status(500).json({ message: 'Internal server error', error: err.message });
-=======
-        console.error('Registration Error:', err);
-        res.status(500).json({ message: 'Internal server error' });
->>>>>>> 4be7d98ab7c4efe107ba456fa586fe39035f554c
     }
 });
 
