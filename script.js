@@ -256,13 +256,16 @@ async function updateGlobalStats() {
         const response = await fetch(`${API_BASE}/stats`);
         if (response.ok) {
             const data = await response.json();
-            updateText('stat-user-count', data.userCount);
-            updateText('stat-org-count', data.orgCount);
-            updateText('stat-sos-count', data.alertCount);
-            updateText('stat-users', (data.userCount || 0) + (data.orgCount || 0));
+            const userCount = data.userCount ?? 0;
+            const orgCount = data.orgCount ?? 0;
+            const alertCount = data.alertCount ?? 0;
+            updateText('stat-user-count', userCount);
+            updateText('stat-org-count', orgCount);
+            updateText('stat-sos-count', alertCount);
+            updateText('stat-users', userCount + orgCount);
             const activeAlertCount = document.getElementById('active-alert-count');
             if (activeAlertCount && currentUser?.role === 'org') {
-                activeAlertCount.innerText = `${data.alertCount} ACTIVE SOS`;
+                activeAlertCount.innerText = `${alertCount} ACTIVE SOS`;
             }
         }
     } catch (e) {

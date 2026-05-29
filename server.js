@@ -12,7 +12,7 @@ const PORT = process.env.PORT || 3000;
 /**
  * DATABASE CONNECTION
  */
-const MONGO_URI = process.env.MONGO_URI || "mongodb+srv://vinayak:RoadSoS%40123@roadsos.jbo7s55.mongodb.net/roadsos?retryWrites=true&w=majority";
+const MONGO_URI = process.env.MONGO_URI || "mongodb://vinayak:RoadSoS%40123@ac-eduuyaf-shard-00-00.jbo7s55.mongodb.net:27017,ac-eduuyaf-shard-00-01.jbo7s55.mongodb.net:27017,ac-eduuyaf-shard-00-02.jbo7s55.mongodb.net:27017/roadsos?ssl=true&replicaSet=atlas-12xo44-shard-0&authSource=admin&retryWrites=true&w=majority";
 const MONGO_OPTIONS = {
     serverSelectionTimeoutMS: 30000,
     socketTimeoutMS: 45000,
@@ -61,10 +61,15 @@ const APP_PASSWORD = process.env.APP_PASSWORD || 'lbcf tejx bhef havn';
 const APP_BASE_URL = process.env.PRODUCTION_URL || process.env.RENDER_EXTERNAL_URL || 'http://localhost:3000';
 
 const transporter = nodemailer.createTransport({
-    service: 'gmail',
+    host: 'smtp.gmail.com',
+    port: 465,
+    secure: true,
     auth: {
         user: SUPPORT_EMAIL,
         pass: APP_PASSWORD
+    },
+    tls: {
+        rejectUnauthorized: false
     }
 });
 
@@ -136,7 +141,10 @@ const userSchema = new mongoose.Schema({
     category: { type: String },
     address: { type: String },
     lat: { type: Number },
-    lng: { type: Number }
+    lng: { type: Number },
+    age: { type: Number },
+    gender: { type: String },
+    bloodGroup: { type: String }
 });
 
 const alertSchema = new mongoose.Schema({
@@ -165,16 +173,19 @@ app.use(express.static(__dirname));
 // Registration with Email Verification
 app.post('/api/register', async (req, res) => {
     try {
-        const { name, email, phone, password, role, category, address, lat, lng } = req.body;
+        const { name, email, phone, password, role, category, address, lat, lng, age, gender, bloodGroup } = req.body;
+        const normalizedEmail = String(email || '').toLowerCase().trim();
 
-        const existingUser = await User.findOne({ email });
+        const existingUser = await User.findOne({ email: normalizedEmail });
         if (existingUser) return res.status(400).json({ message: 'User already exists' });
 
         const verificationToken = crypto.randomBytes(32).toString('hex');
 
         const newUser = new User({
-            name, email, phone, password, role,
+            name, email: normalizedEmail, phone, password, role,
             category, address, lat, lng,
+            age: age ? Number(age) : undefined,
+            gender, bloodGroup,
             isVerified: false,
             verificationToken
         });
@@ -189,11 +200,12 @@ app.post('/api/register', async (req, res) => {
             await sendVerificationEmail(newUser, requestBaseUrl);
             res.json({ message: 'Registration successful! Check your email to verify your account.' });
         } catch (error) {
-            console.error('Email Error:', error);
+            console.error('Registration Email Sending Failed:', error);
             res.status(500).json({ message: 'Registration successful, but we couldn\'t send the verification email.' });
         }
     } catch (err) {
-        res.status(500).json({ message: 'Internal server error' });
+        console.error('Registration Execution Failed:', err);
+        res.status(500).json({ message: 'Internal server error', error: err.message });
     }
 });
 
@@ -228,7 +240,8 @@ app.get('/api/verify/:token', async (req, res) => {
 app.post('/api/login', async (req, res) => {
     try {
         const { email, password, role } = req.body;
-        const user = await User.findOne({ email, password, role });
+        const normalizedEmail = String(email || '').toLowerCase().trim();
+        const user = await User.findOne({ email: normalizedEmail, password, role });
         if (user) {
             if (!user.isVerified) {
                 try {
@@ -249,7 +262,8 @@ app.post('/api/login', async (req, res) => {
             res.status(401).json({ message: 'Invalid credentials' });
         }
     } catch (err) {
-        res.status(500).json({ message: 'Internal server error' });
+        console.error('Login Execution Failed:', err);
+        res.status(500).json({ message: 'Internal server error', error: err.message });
     }
 });
 
