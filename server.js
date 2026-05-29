@@ -7,6 +7,7 @@ const nodemailer = require('nodemailer');
 const crypto = require('crypto');
 
 const app = express();
+app.set('trust proxy', true);
 const DEFAULT_PORT = Number(process.env.PORT) || 3000;
 const MAX_PORT_RETRIES = process.env.PORT ? 0 : 10;
 
@@ -74,10 +75,11 @@ connectMongoDB();
  * EMAIL CONFIGURATION
  */
 const SUPPORT_EMAIL = process.env.SUPPORT_EMAIL || 'roadsosdigix@gmail.com';
-const APP_PASSWORD = process.env.APP_PASSWORD || 'lbcf tejx bhef havn';
-const APP_BASE_URL = process.env.PRODUCTION_URL || process.env.RENDER_EXTERNAL_URL || 'http://localhost:3000';
+const APP_PASSWORD = process.env.APP_PASSWORD || process.env.GMAIL_APP_PASSWORD;
+const APP_BASE_URL = process.env.PRODUCTION_URL || process.env.RENDER_EXTERNAL_URL || 'https://road-safety-sos.onrender.com';
 
-const transporter = nodemailer.createTransport({
+const transporter = APP_PASSWORD
+    ? nodemailer.createTransport({
     host: 'smtp.gmail.com',
     port: 465,
     secure: true,
@@ -85,20 +87,28 @@ const transporter = nodemailer.createTransport({
         user: SUPPORT_EMAIL,
         pass: APP_PASSWORD
     },
-    tls: {
-        rejectUnauthorized: false
-    }
-});
+        tls: {
+            rejectUnauthorized: false
+        }
+    })
+    : null;
 
-transporter.verify((error) => {
-    if (error) {
-        console.error('SMTP connection failed:', error.message);
-    } else {
-        console.log('✅ SMTP server is ready to send verification emails');
-    }
-});
+if (transporter) {
+    transporter.verify((error) => {
+        if (error) {
+            console.error('SMTP connection failed:', error.message);
+        } else {
+            console.log('✅ SMTP server is ready to send verification emails');
+        }
+    });
+} else {
+    console.warn('⚠️ SMTP credentials are not configured. Set APP_PASSWORD (or GMAIL_APP_PASSWORD) in the deployment environment to enable email verification.');
+}
 
 async function sendVerificationEmail(user, baseUrl = APP_BASE_URL) {
+    if (!transporter) {
+        throw new Error('SMTP credentials are not configured. Add APP_PASSWORD/GMAIL_APP_PASSWORD in your deployment environment.');
+    }
     const normalizedBaseUrl = String(baseUrl || APP_BASE_URL).replace(/\/$/, '');
     const verificationLink = `${normalizedBaseUrl}/api/verify/${user.verificationToken}`;
 
@@ -194,7 +204,24 @@ app.post('/api/register', async (req, res) => {
         const normalizedEmail = String(email || '').toLowerCase().trim();
 
         const existingUser = await User.findOne({ email: normalizedEmail });
-        if (existingUser) return res.status(400).json({ message: 'User already exists' });
+        const forwardedProto = req.headers['x-forwarded-proto'] || req.protocol;
+        const forwardedHost = req.headers['x-forwarded-host'] || req.get('host');
+        const requestBaseUrl = forwardedHost ? `${forwardedProto}://${forwardedHost}` : APP_BASE_URL;
+
+        if (existingUser) {
+            if (!existingUser.isVerified) {
+                try {
+                    existingUser.verificationToken = crypto.randomBytes(32).toString('hex');
+                    await existingUser.save();
+                    await sendVerificationEmail(existingUser, requestBaseUrl);
+                    return res.status(200).json({ message: 'This email is already registered but not verified. A new verification email has been sent.' });
+                } catch (emailError) {
+                    console.error('Resend verification email failed:', emailError);
+                    return res.status(500).json({ message: 'This email is already registered but we could not resend the verification email right now.' });
+                }
+            }
+            return res.status(400).json({ message: 'User already exists' });
+        }
 
         const existingPhone = await User.findOne({ phone });
         if (existingPhone) return res.status(400).json({ message: 'Phone number already registered' });
@@ -211,10 +238,6 @@ app.post('/api/register', async (req, res) => {
         });
 
         await newUser.save();
-
-        const forwardedProto = req.headers['x-forwarded-proto'] || req.protocol;
-        const forwardedHost = req.headers['x-forwarded-host'] || req.get('host');
-        const requestBaseUrl = forwardedHost ? `${forwardedProto}://${forwardedHost}` : APP_BASE_URL;
 
         try {
             await sendVerificationEmail(newUser, requestBaseUrl);
