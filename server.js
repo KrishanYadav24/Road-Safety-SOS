@@ -3,8 +3,8 @@ const express = require('express');
 const cors = require('cors');
 const bodyParser = require('body-parser');
 const mongoose = require('mongoose');
-const nodemailer = require('nodemailer');
 const crypto = require('crypto');
+const { Resend } = require('resend');
 
 const app = express();
 app.set('trust proxy', true);
@@ -72,42 +72,21 @@ mongoose.connection.on('error', (err) => {
 connectMongoDB();
 
 /**
- * EMAIL CONFIGURATION
+ * EMAIL CONFIGURATION — Resend
  */
-const SUPPORT_EMAIL = process.env.SUPPORT_EMAIL || 'roadsosdigix@gmail.com';
-const APP_PASSWORD = process.env.APP_PASSWORD || process.env.GMAIL_APP_PASSWORD;
 const APP_BASE_URL = process.env.PRODUCTION_URL || process.env.RENDER_EXTERNAL_URL || 'https://road-safety-sos-27p4.onrender.com';
-
-const transporter = APP_PASSWORD
-    ? nodemailer.createTransport({
-    host: 'smtp.gmail.com',
-    port: 587,
-    secure: false,
-    requireTLS: true,
-    auth: {
-        user: SUPPORT_EMAIL,
-        pass: APP_PASSWORD
-    },
-    tls: {
-        rejectUnauthorized: false,
-        minVersion: 'TLSv1.2'
-    },
-    connectionTimeout: 10000,
-    greetingTimeout: 10000,
-    socketTimeout: 10000,
-    })
-    : null;
-
+const resend = new Resend(process.env.RESEND_API_KEY);
 
 async function sendVerificationEmail(user, baseUrl = APP_BASE_URL) {
-    if (!transporter) {
-        throw new Error('SMTP credentials are not configured. Add APP_PASSWORD/GMAIL_APP_PASSWORD in your deployment environment.');
+    if (!process.env.RESEND_API_KEY) {
+        throw new Error('RESEND_API_KEY is not configured in environment variables.');
     }
+
     const normalizedBaseUrl = String(baseUrl || APP_BASE_URL).replace(/\/$/, '');
     const verificationLink = `${normalizedBaseUrl}/api/verify/${user.verificationToken}`;
 
-    const mailOptions = {
-        from: `"RoadSafetySoS Support" <${SUPPORT_EMAIL}>`,
+    const { error } = await resend.emails.send({
+        from: 'RoadSafetySoS <onboarding@resend.dev>',
         to: user.email,
         subject: 'Complete Your Registration - RoadSafetySoS',
         html: `
@@ -143,9 +122,13 @@ async function sendVerificationEmail(user, baseUrl = APP_BASE_URL) {
                 </div>
             </div>
         `
-    };
+    });
 
-    await transporter.sendMail(mailOptions);
+    if (error) {
+        throw new Error(`Resend error: ${error.message}`);
+    }
+
+    console.log('✅ Verification email sent to', user.email);
 }
 
 // --- AUTH MIDDLEWARE ---
@@ -217,7 +200,6 @@ const alertSchema = new mongoose.Schema({
 const User = mongoose.model('User', userSchema);
 const Alert = mongoose.model('Alert', alertSchema);
 
-// Organization collection: separate from users for clearer separation
 const organizationSchema = new mongoose.Schema({
     name: String,
     email: { type: String, lowercase: true, index: true },
@@ -283,19 +265,10 @@ app.post('/api/register', async (req, res) => {
 
         await newUser.save();
 
-        // If organization, create an Organization document for easier queries and separate storage
         if (role === 'org') {
             try {
                 await Organization.updateOne({ email: normalizedEmail }, {
-                    $set: {
-                        name: name,
-                        email: normalizedEmail,
-                        phone,
-                        category,
-                        address,
-                        lat,
-                        lng
-                    }
+                    $set: { name, email: normalizedEmail, phone, category, address, lat, lng }
                 }, { upsert: true });
             } catch (orgErr) {
                 console.warn('Failed to create Organization record:', orgErr.message);
@@ -349,23 +322,30 @@ app.post('/api/login', async (req, res) => {
         const normalizedEmail = String(email || '').toLowerCase().trim();
         const user = await User.findOne({ email: normalizedEmail, role });
         const bcrypt = require('bcryptjs');
+
         if (user) {
             if (!user.isVerified) {
                 try {
-                    const verificationToken = crypto.randomBytes(32).toString('hex');
-                    user.verificationToken = verificationToken;
-                    await user.save();
-                    await sendVerificationEmail(user);
+                    const forwardedProto = req.headers['x-forwarded-proto'] || req.protocol;
+                    const forwardedHost = req.headers['x-forwarded-host'] || req.get('host');
+                    const requestBaseUrl = forwardedHost ? `${forwardedProto}://${forwardedHost}` : APP_BASE_URL;
+
+                    // Only regenerate token if there isn't one already (avoids invalidating old emails)
+                    if (!user.verificationToken) {
+                        user.verificationToken = crypto.randomBytes(32).toString('hex');
+                        await user.save();
+                    }
+                    await sendVerificationEmail(user, requestBaseUrl);
                     return res.status(401).json({ message: 'Verify your email first. A new verification email has been sent.' });
                 } catch (emailError) {
                     console.error('Resend Email Error:', emailError);
                     return res.status(500).json({ message: 'Verify your email first. We could not resend the verification email right now.' });
                 }
             }
+
             const match = await bcrypt.compare(String(password || ''), user.password);
             if (!match) return res.status(401).json({ message: 'Invalid credentials' });
 
-            const jwt = require('jsonwebtoken');
             const token = jwt.sign({ email: user.email, role: user.role }, process.env.JWT_SECRET || 'dev-secret', { expiresIn: '12h' });
 
             const userObj = user.toObject();
@@ -386,11 +366,7 @@ app.post('/api/sos', async (req, res) => {
         const existingAlert = await Alert.findOne({ id: alertData.id });
         const normalizedEmail = alertData.userEmail ? String(alertData.userEmail).toLowerCase() : undefined;
 
-        // Ensure status is handled correctly on creation/update
-        const newAlertData = {
-            ...alertData,
-            userEmail: normalizedEmail
-        };
+        const newAlertData = { ...alertData, userEmail: normalizedEmail };
 
         if (!existingAlert) {
             newAlertData.status = 'pending';
@@ -399,7 +375,6 @@ app.post('/api/sos', async (req, res) => {
             return res.json({ message: 'SOS triggered', alert: newAlert });
         }
 
-        // If updating an existing alert, don't overwrite status if it's already attended or resolved
         if (existingAlert.status !== 'pending') {
             delete newAlertData.status;
         }
@@ -429,7 +404,6 @@ app.post('/api/alerts/:id/attend', authenticateToken, async (req, res) => {
         const alert = await Alert.findOne({ id: Number(req.params.id) });
         if (!alert) return res.status(404).json({ message: 'Alert not found' });
 
-        // IMPORTANT: Guard against double attendance
         if (alert.status !== 'pending') {
             return res.status(400).json({ message: 'This alert is already being attended or has been resolved.' });
         }
@@ -541,12 +515,10 @@ app.get('/api/alerts', async (req, res) => {
 
         if (orgEmail) {
             const orgId = String(orgEmail).toLowerCase();
-            // Show pending OR alerts attended by this organization specifically
             filter.$or = [
                 { status: 'pending' },
                 { status: 'attended', 'attendingOrg.orgId': orgId }
             ];
-            // Clear status filter since $or handles it
             if (filter.status) delete filter.status;
         }
 
@@ -586,7 +558,6 @@ app.get('/api/stats', async (req, res) => {
 
 app.get('/api/organizations', async (req, res) => {
     try {
-        // Prefer dedicated Organization collection; fallback to users with role 'org' for backward compatibility
         try {
             const orgs = await Organization.find();
             if (orgs && orgs.length) return res.json(orgs);
@@ -600,7 +571,6 @@ app.get('/api/organizations', async (req, res) => {
     }
 });
 
-// Get profile (user or org) by email
 app.get('/api/profile', authenticateToken, async (req, res) => {
     try {
         const email = String(req.query.email || '').toLowerCase();
@@ -615,9 +585,7 @@ app.get('/api/profile', authenticateToken, async (req, res) => {
 
         if (user.role === 'org') {
             const org = await Organization.findOne({ email });
-            if (org) {
-                userObj.orgProfile = org.toObject();
-            }
+            if (org) userObj.orgProfile = org.toObject();
         }
 
         res.json({ user: userObj });
@@ -627,7 +595,6 @@ app.get('/api/profile', authenticateToken, async (req, res) => {
     }
 });
 
-// Update profile (user or org)
 app.put('/api/profile', authenticateToken, async (req, res) => {
     try {
         const { email, updates } = req.body;
@@ -652,7 +619,6 @@ app.put('/api/profile', authenticateToken, async (req, res) => {
         await User.updateOne({ email: normalizedEmail }, { $set: set });
 
         if (user.role === 'org') {
-            // sync organization collection
             const orgSet = {};
             ['name', 'phone', 'address', 'lat', 'lng', 'category'].forEach(k => { if (set[k] !== undefined) orgSet[k] = set[k]; });
             if (Object.keys(orgSet).length) {
@@ -661,7 +627,8 @@ app.put('/api/profile', authenticateToken, async (req, res) => {
         }
 
         const updated = await User.findOne({ email: normalizedEmail });
-        const updatedObj = updated.toObject(); delete updatedObj.password;
+        const updatedObj = updated.toObject();
+        delete updatedObj.password;
         res.json({ message: 'Profile updated', user: updatedObj });
     } catch (err) {
         console.error('Update profile failed:', err);
@@ -694,6 +661,7 @@ const startServer = (port = DEFAULT_PORT, retries = MAX_PORT_RETRIES) => {
 };
 
 startServer();
+
 const shutdown = async (signal) => {
     console.log(`🛑 Received ${signal}. Shutting down server...`);
     server.close(async () => {
