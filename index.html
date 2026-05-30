@@ -47,16 +47,83 @@
         .custom-scrollbar::-webkit-scrollbar-thumb { background: #cbd5e1; border-radius: 10px; }
 
         .resource-btn {
-            @apply flex flex-col items-center justify-center p-4 rounded-2xl border-2 border-slate-100 transition-all duration-200 text-center;
+            display: flex;
+            align-items: center;
+            gap: 0.55rem;
+            width: 100%;
+            min-height: 4.25rem;
+            padding: 0.6rem;
+            border: 1px solid #e2e8f0;
+            border-radius: 1rem;
+            background: #fff;
+            text-align: left;
+            box-shadow: 0 1px 2px rgba(15, 23, 42, 0.04);
+            transition: transform 0.2s ease, box-shadow 0.2s ease, border-color 0.2s ease, background 0.2s ease;
+        }
+        .resource-btn:hover {
+            transform: translateY(-2px);
+            border-color: #bfdbfe;
+            box-shadow: 0 10px 20px rgba(15, 23, 42, 0.08);
         }
         .resource-btn.active {
-            @apply border-blue-600 bg-blue-50 shadow-sm;
+            border-color: #3b82f6;
+            background: #eff6ff;
+            box-shadow: 0 12px 24px rgba(37, 99, 235, 0.14);
+            outline: 2px solid #dbeafe;
         }
         .resource-btn i {
-            @apply text-xl mb-2;
+            font-size: 1.05rem;
         }
-        .resource-btn span {
-            @apply text-[10px] font-bold uppercase tracking-wider;
+        .resource-btn .resource-icon {
+            width: 2.15rem;
+            height: 2.15rem;
+            border-radius: 0.85rem;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            background: #f8fafc;
+            flex: 0 0 auto;
+        }
+        .resource-btn.active .resource-icon {
+            background: #fff;
+        }
+        .resource-btn > span:not(.resource-icon) {
+            display: block;
+            flex: 1 1 auto;
+            min-width: 0;
+            color: #0f172a;
+            font-size: 0.78rem;
+            font-weight: 800;
+            line-height: 1.15;
+            word-break: normal;
+            overflow-wrap: normal;
+        }
+        .resource-btn > span:not(.resource-icon) small {
+            display: block;
+            margin-top: 0.15rem;
+            color: #64748b;
+            font-size: 0.55rem;
+            font-weight: 800;
+            letter-spacing: 0;
+            line-height: 1.2;
+            text-transform: uppercase;
+        }
+        @media (max-width: 420px) {
+            .resource-btn {
+                min-height: 4rem;
+                padding: 0.65rem;
+                gap: 0.55rem;
+            }
+            .resource-btn .resource-icon {
+                width: 2.25rem;
+                height: 2.25rem;
+            }
+            .resource-btn > span:not(.resource-icon) {
+                font-size: 0.78rem;
+            }
+            .resource-btn > span:not(.resource-icon) small {
+                font-size: 0.56rem;
+            }
         }
     </style>
 </head>
@@ -280,55 +347,64 @@
     <section id="user-dashboard" class="hidden max-w-7xl mx-auto space-y-6">
         <div class="grid grid-cols-1 lg:grid-cols-12 gap-8">
             <div class="lg:col-span-3 space-y-6">
-                <div class="bg-white p-6 rounded-3xl shadow-sm border border-slate-100">
-                    <h3 class="text-lg font-bold mb-4 flex items-center"><i class="fas fa-shield-heart mr-3 text-blue-600"></i> Safety Center</h3>
-                    <div class="space-y-6">
-                        <select id="radius-select" class="w-full p-3 bg-slate-50 rounded-xl text-sm outline-none border border-slate-200">
-                            <option value="1000">1 KM Radius</option>
-                            <option value="5000" selected>5 KM Radius</option>
-                            <option value="10000">10 KM Radius</option>
-                        </select>
+                <div class="bg-white p-5 rounded-3xl shadow-sm border border-slate-100">
+                    <div class="flex items-start justify-between gap-3 mb-5">
+                        <div>
+                            <h3 class="text-lg font-black text-slate-900 flex items-center"><i class="fas fa-shield-heart mr-3 text-blue-600"></i> Safety Center</h3>
+                            <p class="text-xs text-slate-500 font-semibold mt-1">Find nearby help by service type</p>
+                        </div>
+                        <span class="w-9 h-9 rounded-2xl bg-blue-50 text-blue-600 flex items-center justify-center shrink-0"><i class="fas fa-location-crosshairs"></i></span>
+                    </div>
+                    <div class="space-y-5">
+                        <label class="block">
+                            <span class="block text-[10px] font-black uppercase tracking-widest text-slate-400 mb-2">Search Radius</span>
+                            <select id="radius-select" class="w-full p-3.5 bg-slate-50 rounded-2xl text-sm font-bold outline-none border border-slate-200 focus:ring-2 focus:ring-blue-100 focus:border-blue-400">
+                                <option value="1000">1 KM Radius</option>
+                                <option value="5000" selected>5 KM Radius</option>
+                                <option value="10000">10 KM Radius</option>
+                            </select>
+                        </label>
 
                         <div class="grid grid-cols-2 gap-3" id="support-services-grid">
-                            <button onclick="setSupportResource('hospital')" id="btn-hospital" class="resource-btn active">
-                                <i class="fas fa-hospital text-red-600"></i>
-                                <span>Hospital</span>
+                            <button type="button" onclick="setSupportResource('hospital')" id="btn-hospital" class="resource-btn active">
+                                <span class="resource-icon"><i class="fas fa-hospital text-red-600"></i></span>
+                                <span>Hospital<small>Medical</small></span>
                             </button>
-                            <button onclick="setSupportResource('police')" id="btn-police" class="resource-btn">
-                                <i class="fas fa-shield-alt text-blue-700"></i>
-                                <span>Police</span>
+                            <button type="button" onclick="setSupportResource('police')" id="btn-police" class="resource-btn">
+                                <span class="resource-icon"><i class="fas fa-shield-alt text-blue-700"></i></span>
+                                <span>Police<small>Security</small></span>
                             </button>
-                            <button onclick="setSupportResource('trauma')" id="btn-trauma" class="resource-btn">
-                                <i class="fas fa-procedures text-fuchsia-600"></i>
-                                <span>Trauma</span>
+                            <button type="button" onclick="setSupportResource('trauma')" id="btn-trauma" class="resource-btn">
+                                <span class="resource-icon"><i class="fas fa-procedures text-fuchsia-600"></i></span>
+                                <span>Trauma<small>Urgent care</small></span>
                             </button>
-                            <button onclick="setSupportResource('clinic')" id="btn-clinic" class="resource-btn">
-                                <i class="fas fa-clinic-medical text-emerald-600"></i>
-                                <span>Clinic</span>
+                            <button type="button" onclick="setSupportResource('clinic')" id="btn-clinic" class="resource-btn">
+                                <span class="resource-icon"><i class="fas fa-clinic-medical text-emerald-600"></i></span>
+                                <span>Clinic<small>Primary care</small></span>
                             </button>
-                            <button onclick="setSupportResource('ambulance')" id="btn-ambulance" class="resource-btn">
-                                <i class="fas fa-ambulance text-sky-600"></i>
-                                <span>Ambulance</span>
+                            <button type="button" onclick="setSupportResource('ambulance')" id="btn-ambulance" class="resource-btn">
+                                <span class="resource-icon"><i class="fas fa-ambulance text-sky-600"></i></span>
+                                <span>Ambulance<small>Rapid help</small></span>
                             </button>
-                            <button onclick="setSupportResource('mechanics')" id="btn-mechanics" class="resource-btn">
-                                <i class="fas fa-tools text-amber-600"></i>
-                                <span>Mechanic</span>
+                            <button type="button" onclick="setSupportResource('mechanics')" id="btn-mechanics" class="resource-btn">
+                                <span class="resource-icon"><i class="fas fa-tools text-amber-600"></i></span>
+                                <span>Mechanic<small>Repair</small></span>
                             </button>
-                            <button onclick="setSupportResource('puncture')" id="btn-puncture" class="resource-btn">
-                                <i class="fas fa-circle-notch text-orange-600"></i>
-                                <span>Puncture</span>
+                            <button type="button" onclick="setSupportResource('puncture')" id="btn-puncture" class="resource-btn">
+                                <span class="resource-icon"><i class="fas fa-circle-notch text-orange-600"></i></span>
+                                <span>Puncture<small>Tyre fix</small></span>
                             </button>
-                            <button onclick="setSupportResource('showroom')" id="btn-showroom" class="resource-btn">
-                                <i class="fas fa-store text-blue-500"></i>
-                                <span>Showroom</span>
+                            <button type="button" onclick="setSupportResource('showroom')" id="btn-showroom" class="resource-btn">
+                                <span class="resource-icon"><i class="fas fa-store text-blue-500"></i></span>
+                                <span>Showroom<small>Dealer</small></span>
                             </button>
-                            <button onclick="setSupportResource('orgs')" id="btn-orgs" class="resource-btn col-span-2">
-                                <i class="fas fa-check-circle text-emerald-500"></i>
-                                <span>Verified Orgs</span>
+                            <button type="button" onclick="setSupportResource('orgs')" id="btn-orgs" class="resource-btn col-span-2">
+                                <span class="resource-icon"><i class="fas fa-check-circle text-emerald-500"></i></span>
+                                <span>Verified Orgs<small>Registered responders</small></span>
                             </button>
                         </div>
 
-                        <div id="support-resource-status" class="text-xs text-slate-500 mt-4 leading-relaxed font-medium bg-slate-50 p-3 rounded-xl border border-slate-100">
+                        <div id="support-resource-status" class="text-xs text-slate-600 leading-relaxed font-semibold bg-slate-50 p-4 rounded-2xl border border-slate-100">
                             Showing nearby Hospitals. Found 0 contacts.
                         </div>
                     </div>
@@ -346,12 +422,27 @@
                 </div>
             </div>
             <div class="lg:col-span-9 space-y-4">
-                <div id="map" class="shadow-xl"></div>
-                <div class="bg-white p-4 rounded-2xl border border-slate-100 flex flex-col sm:flex-row justify-between items-center text-xs font-bold text-slate-500 gap-4">
-                    <div id="location-status"><i class="fas fa-location-arrow mr-2 text-blue-600"></i>Detecting GPS...</div>
-                    <div class="px-4 py-2 bg-blue-50 text-blue-600 rounded-full uppercase tracking-wider">Nearby Resources: <span id="stat-contacts">0</span></div>
+                <div class="bg-white p-2 rounded-2xl border border-slate-100 shadow-sm grid grid-cols-3 gap-2">
+                    <button id="tab-map" onclick="showUserTab('map')" class="user-tab-btn bg-blue-600 text-white px-4 py-3 rounded-xl text-sm font-black">
+                        <i class="fas fa-map-location-dot mr-2"></i>Map
+                    </button>
+                    <button id="tab-history" onclick="showUserTab('history')" class="user-tab-btn text-slate-600 hover:bg-slate-50 px-4 py-3 rounded-xl text-sm font-black">
+                        <i class="fas fa-clock-rotate-left mr-2"></i>History
+                    </button>
+                    <button id="tab-settings" onclick="showUserTab('settings')" class="user-tab-btn text-slate-600 hover:bg-slate-50 px-4 py-3 rounded-xl text-sm font-black">
+                        <i class="fas fa-user-gear mr-2"></i>Settings
+                    </button>
                 </div>
-                <div id="history-panel" class="bg-white p-6 rounded-3xl border border-slate-100 shadow-sm mt-6">
+
+                <div id="user-map-panel" class="space-y-4">
+                    <div id="map" class="shadow-xl"></div>
+                    <div class="bg-white p-4 rounded-2xl border border-slate-100 flex flex-col sm:flex-row justify-between items-center text-xs font-bold text-slate-500 gap-4">
+                        <div id="location-status"><i class="fas fa-location-arrow mr-2 text-blue-600"></i>Detecting GPS...</div>
+                        <div class="px-4 py-2 bg-blue-50 text-blue-600 rounded-full uppercase tracking-wider">Nearby Resources: <span id="stat-contacts">0</span></div>
+                    </div>
+                </div>
+
+                <div id="history-panel" class="hidden bg-white p-6 rounded-3xl border border-slate-100 shadow-sm">
                     <div class="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4 mb-4">
                         <div>
                             <h3 class="text-lg font-bold text-slate-900">SOS History</h3>
@@ -360,6 +451,68 @@
                         <button onclick="fetchUserHistory()" class="bg-slate-900 text-white px-4 py-3 rounded-2xl text-sm font-bold hover:bg-black transition-all">Refresh History</button>
                     </div>
                     <div id="history-list" class="space-y-4"></div>
+                </div>
+
+                <div id="settings-panel" class="hidden bg-white p-6 rounded-3xl border border-slate-100 shadow-sm">
+                    <div class="flex flex-col md:flex-row justify-between items-start md:items-center gap-4 mb-6">
+                        <div>
+                            <h3 class="text-xl font-black text-slate-900">Personal Settings</h3>
+                            <p class="text-sm text-slate-500 font-medium">Keep these details ready for SOS responders.</p>
+                        </div>
+                        <span id="settings-save-status" class="text-xs font-bold text-slate-400"></span>
+                    </div>
+                    <form id="settings-form" onsubmit="saveUserSettings(event)" class="space-y-5">
+                        <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+                            <label class="block">
+                                <span class="block text-[10px] font-black uppercase tracking-widest text-slate-400 mb-2">Full Name</span>
+                                <input id="settings-name" type="text" class="w-full p-3.5 bg-slate-50 border border-slate-200 rounded-2xl text-sm outline-none focus:ring-2 focus:ring-blue-100 focus:border-blue-400">
+                            </label>
+                            <label class="block">
+                                <span class="block text-[10px] font-black uppercase tracking-widest text-slate-400 mb-2">Phone Number</span>
+                                <input id="settings-phone" type="tel" class="w-full p-3.5 bg-slate-50 border border-slate-200 rounded-2xl text-sm outline-none focus:ring-2 focus:ring-blue-100 focus:border-blue-400">
+                            </label>
+                            <label class="block">
+                                <span class="block text-[10px] font-black uppercase tracking-widest text-slate-400 mb-2">Age</span>
+                                <input id="settings-age" type="number" min="1" max="120" class="w-full p-3.5 bg-slate-50 border border-slate-200 rounded-2xl text-sm outline-none focus:ring-2 focus:ring-blue-100 focus:border-blue-400">
+                            </label>
+                            <label class="block">
+                                <span class="block text-[10px] font-black uppercase tracking-widest text-slate-400 mb-2">Gender</span>
+                                <select id="settings-gender" class="w-full p-3.5 bg-slate-50 border border-slate-200 rounded-2xl text-sm outline-none focus:ring-2 focus:ring-blue-100 focus:border-blue-400">
+                                    <option value="">Select gender</option>
+                                    <option value="Male">Male</option>
+                                    <option value="Female">Female</option>
+                                    <option value="Other">Other</option>
+                                    <option value="Prefer not to say">Prefer not to say</option>
+                                </select>
+                            </label>
+                            <label class="block">
+                                <span class="block text-[10px] font-black uppercase tracking-widest text-slate-400 mb-2">Blood Group</span>
+                                <select id="settings-blood-group" class="w-full p-3.5 bg-slate-50 border border-slate-200 rounded-2xl text-sm outline-none focus:ring-2 focus:ring-blue-100 focus:border-blue-400">
+                                    <option value="">Select blood group</option>
+                                    <option value="A+">A+</option><option value="A-">A-</option>
+                                    <option value="B+">B+</option><option value="B-">B-</option>
+                                    <option value="O+">O+</option><option value="O-">O-</option>
+                                    <option value="AB+">AB+</option><option value="AB-">AB-</option>
+                                </select>
+                            </label>
+                            <label class="block">
+                                <span class="block text-[10px] font-black uppercase tracking-widest text-slate-400 mb-2">Email</span>
+                                <input id="settings-email" type="email" disabled class="w-full p-3.5 bg-slate-100 border border-slate-200 rounded-2xl text-sm text-slate-500">
+                            </label>
+                        </div>
+                        <label class="block">
+                            <span class="block text-[10px] font-black uppercase tracking-widest text-slate-400 mb-2">Residential Address</span>
+                            <textarea id="settings-address" rows="4" class="w-full p-3.5 bg-slate-50 border border-slate-200 rounded-2xl text-sm outline-none focus:ring-2 focus:ring-blue-100 focus:border-blue-400"></textarea>
+                        </label>
+                        <div class="flex flex-col sm:flex-row gap-3">
+                            <button type="submit" class="bg-blue-600 text-white px-6 py-3.5 rounded-2xl text-sm font-black hover:bg-blue-700 transition-all">
+                                <i class="fas fa-floppy-disk mr-2"></i>Save Settings
+                            </button>
+                            <button type="button" onclick="populateSettingsForm()" class="bg-slate-100 text-slate-600 px-6 py-3.5 rounded-2xl text-sm font-black hover:bg-slate-200 transition-all">
+                                Reset
+                            </button>
+                        </div>
+                    </form>
                 </div>
             </div>
         </div>

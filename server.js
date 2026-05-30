@@ -623,7 +623,7 @@ app.put('/api/profile', authenticateToken, async (req, res) => {
         const user = await User.findOne({ email: normalizedEmail });
         if (!user) return res.status(404).json({ message: 'User not found' });
 
-        const allowed = ['name', 'phone', 'address', 'lat', 'lng', 'category', 'photoUrl'];
+        const allowed = ['name', 'phone', 'address', 'lat', 'lng', 'category', 'photoUrl', 'age', 'gender', 'bloodGroup'];
         const set = {};
         for (const k of Object.keys(updates || {})) {
             if (allowed.includes(k)) set[k] = updates[k];

@@ -18,8 +18,21 @@ let activeSOSPollingTimer = null;
 let sosAttendedNotified = false;
 let sosRadiusIndex = 0;
 let sosTimer = null;
+let activeSupportResource = 'hospital';
+let mapSearchRequestId = 0;
 const SOS_RADII = [1000, 2000, 3000, 4000, 5000];
 const SOS_POLL_INTERVAL = 5000;
+const RESOURCE_SEARCH_TIMEOUT = 8000;
+const OVERPASS_ENDPOINTS = [
+    'https://overpass-api.de/api/interpreter',
+    'https://overpass.kumi.systems/api/interpreter'
+];
+
+function fetchWithTimeout(url, timeout = RESOURCE_SEARCH_TIMEOUT) {
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), timeout);
+    return fetch(url, { signal: controller.signal }).finally(() => clearTimeout(timer));
+}
 
 // Determine API Base URL based on environment
 // Update the Render URL if your backend is deployed at a different address
@@ -170,6 +183,8 @@ function showSection(sectionId) {
         }
 
         if (sectionId === 'user-dashboard') {
+            showUserTab('map');
+            populateSettingsForm();
             initUserMap();
             requestLocation();
             fetchUserHistory();
@@ -300,6 +315,117 @@ function closeProfileModal() {
     if (!modal) return;
     modal.classList.remove('modal-active');
     setTimeout(() => modal.classList.add('hidden'), 200);
+}
+
+function showUserTab(tab) {
+    const panels = {
+        map: document.getElementById('user-map-panel'),
+        history: document.getElementById('history-panel'),
+        settings: document.getElementById('settings-panel')
+    };
+    const buttons = {
+        map: document.getElementById('tab-map'),
+        history: document.getElementById('tab-history'),
+        settings: document.getElementById('tab-settings')
+    };
+
+    Object.entries(panels).forEach(([key, panel]) => {
+        if (panel) panel.classList.toggle('hidden', key !== tab);
+    });
+
+    Object.entries(buttons).forEach(([key, button]) => {
+        if (!button) return;
+        button.className = key === tab
+            ? 'user-tab-btn bg-blue-600 text-white px-4 py-3 rounded-xl text-sm font-black'
+            : 'user-tab-btn text-slate-600 hover:bg-slate-50 px-4 py-3 rounded-xl text-sm font-black';
+    });
+
+    if (tab === 'settings') populateSettingsForm();
+    if (tab === 'history') fetchUserHistory();
+    if (tab === 'map' && map) setTimeout(() => map.invalidateSize(), 50);
+}
+
+function populateSettingsForm() {
+    if (!currentUser || currentUser.role !== 'user') return;
+    const fields = {
+        'settings-name': currentUser.name || '',
+        'settings-phone': currentUser.phone || '',
+        'settings-email': currentUser.email || '',
+        'settings-age': currentUser.age || '',
+        'settings-gender': currentUser.gender || '',
+        'settings-blood-group': currentUser.bloodGroup || '',
+        'settings-address': currentUser.address || ''
+    };
+
+    Object.entries(fields).forEach(([id, value]) => {
+        const el = document.getElementById(id);
+        if (el) el.value = value;
+    });
+}
+
+function isUserProfileIncomplete(user = currentUser) {
+    if (!user || user.role !== 'user') return false;
+    return ['name', 'phone', 'address', 'age', 'gender', 'bloodGroup'].some(key => !user[key]);
+}
+
+function promptForMissingProfileInfo() {
+    if (!isUserProfileIncomplete()) return;
+    setTimeout(() => {
+        showAlert(
+            'Complete Your Safety Profile',
+            'Please add your address, age, gender, and blood group in the Settings tab. These details help responders during an SOS.',
+            'info',
+            () => showUserTab('settings')
+        );
+    }, 600);
+}
+
+async function saveUserSettings(event) {
+    event.preventDefault();
+    if (!currentUser || currentUser.role !== 'user') {
+        return showAlert('Not logged in', 'Please login as a user to update settings.', 'warning');
+    }
+
+    const updates = {
+        name: document.getElementById('settings-name').value.trim(),
+        phone: document.getElementById('settings-phone').value.trim(),
+        age: document.getElementById('settings-age').value ? Number(document.getElementById('settings-age').value) : '',
+        gender: document.getElementById('settings-gender').value,
+        bloodGroup: document.getElementById('settings-blood-group').value,
+        address: document.getElementById('settings-address').value.trim()
+    };
+
+    const statusEl = document.getElementById('settings-save-status');
+    if (statusEl) {
+        statusEl.innerText = 'Saving...';
+        statusEl.className = 'text-xs font-bold text-blue-500';
+    }
+
+    try {
+        const response = await apiFetch('/profile', {
+            method: 'PUT',
+            body: JSON.stringify({ email: currentUser.email, updates })
+        });
+        const data = await response.json();
+        if (!response.ok) throw new Error(data.message || 'Update failed');
+
+        currentUser = data.user;
+        localStorage.setItem('cached_user', JSON.stringify(currentUser));
+        document.getElementById('user-display-name').innerText = currentUser.name;
+        populateSettingsForm();
+
+        if (statusEl) {
+            statusEl.innerText = 'Saved successfully';
+            statusEl.className = 'text-xs font-bold text-emerald-600';
+        }
+        showAlert('Settings Saved', 'Your personal safety details have been updated.', 'success');
+    } catch (err) {
+        if (statusEl) {
+            statusEl.innerText = 'Save failed';
+            statusEl.className = 'text-xs font-bold text-red-500';
+        }
+        showAlert('Save Failed', err.message || 'Unable to update settings right now.', 'error');
+    }
 }
 
 async function saveProfile(e) {
@@ -617,6 +743,7 @@ async function handleLogin() {
             if (data.token) localStorage.setItem('auth_token', data.token);
             localStorage.setItem('cached_user', JSON.stringify(currentUser));
             showSection(role === 'user' ? 'user-dashboard' : 'org-dashboard');
+            if (role === 'user') promptForMissingProfileInfo();
             updateGlobalStats();
         } else {
             showAlert('Login Failed', data.message, 'error');
@@ -627,6 +754,7 @@ async function handleLogin() {
             currentUser = cachedUser;
             showAlert('Offline Access', 'Accessing your dashboard using cached credentials.', 'info');
             showSection(role === 'user' ? 'user-dashboard' : 'org-dashboard');
+            if (role === 'user') promptForMissingProfileInfo();
         } else {
             showAlert('Connection Required', 'An internet connection is required for first-time login.', 'warning');
         }
@@ -667,6 +795,7 @@ function requestLocation() {
 
 async function updateMap() {
     if (!userLocation) return;
+    const requestId = ++mapSearchRequestId;
     map.eachLayer(layer => { if (layer instanceof L.Marker && layer !== userMarker) map.removeLayer(layer); });
     registeredOrgMarkers = [];
 
@@ -675,33 +804,29 @@ async function updateMap() {
     const lng = userLocation.lng;
 
     const categories = [
-        { id: 'check-hospital', type: 'Hospital', query: `nwr["amenity"="hospital"](around:${radius},${lat},${lng});`, color: '#dc2626', icon: 'fa-hospital' },
-        { id: 'check-police', type: 'Police', query: `(nwr["amenity"="police"](around:${radius},${lat},${lng}); nwr["name"~"Police",i](around:${radius},${lat},${lng}););`, color: '#1e40af', icon: 'fa-shield-alt' },
-        { id: 'check-trauma', type: 'Trauma Center', query: `(nwr["emergency"="trauma"](around:${radius},${lat},${lng}); nwr["healthcare"="trauma"](around:${radius},${lat},${lng}); nwr["name"~"Trauma",i](around:${radius},${lat},${lng}););`, color: '#c026d3', icon: 'fa-procedures' },
-        { id: 'check-clinic', type: 'Clinic', query: `(nwr["amenity"="clinic"](around:${radius},${lat},${lng}); nwr["healthcare"="clinic"](around:${radius},${lat},${lng}); nwr["name"~"Clinic",i](around:${radius},${lat},${lng}););`, color: '#059669', icon: 'fa-clinic-medical' },
-        { id: 'check-ambulance', type: 'Ambulance Service', query: `(nwr["amenity"="ambulance"](around:${radius},${lat},${lng}); nwr["name"~"Ambulance",i](around:${radius},${lat},${lng}););`, color: '#0284c7', icon: 'fa-ambulance' },
-        { id: 'check-mechanics', type: 'Mechanic', query: `(nwr["shop"="car_repair"](around:${radius},${lat},${lng}); nwr["shop"="tyres"](around:${radius},${lat},${lng}); nwr["amenity"="car_repair"](around:${radius},${lat},${lng}); nwr["name"~"Mechanic|Towing|Tow|Breakdown|Roadside",i](around:${radius},${lat},${lng}););`, color: '#d97706', icon: 'fa-tools' },
-        { id: 'check-puncture', type: 'Puncture Shop', query: `(nwr["shop"="tyres"](around:${radius},${lat},${lng}); nwr["name"~"Puncture|Tyre|Tube",i](around:${radius},${lat},${lng}););`, color: '#f97316', icon: 'fa-circle-notch' },
-        { id: 'check-showroom', type: 'Showroom', query: `(nwr["shop"="car_dealer"](around:${radius},${lat},${lng}); nwr["name"~"Showroom|Dealer",i](around:${radius},${lat},${lng}););`, color: '#0ea5e9', icon: 'fa-store' }
+        { key: 'hospital', type: 'Hospital', searchText: 'hospital medical medicare', buildQuery: searchRadius => `nwr["amenity"="hospital"](around:${searchRadius},${lat},${lng});nwr["healthcare"="hospital"](around:${searchRadius},${lat},${lng});nwr["name"~"Hospital|Medical|Medicare",i](around:${searchRadius},${lat},${lng});`, color: '#dc2626', icon: 'fa-hospital' },
+        { key: 'police', type: 'Police', searchText: 'police station thana chowki', buildQuery: searchRadius => `nwr["amenity"="police"](around:${searchRadius},${lat},${lng});nwr["police"](around:${searchRadius},${lat},${lng});nwr["name"~"Police|Thana|Chowki|Kotwali",i](around:${searchRadius},${lat},${lng});`, color: '#1e40af', icon: 'fa-shield-alt' },
+        { key: 'trauma', type: 'Trauma Center', searchText: 'trauma emergency accident hospital', buildQuery: searchRadius => `nwr["emergency"="trauma"](around:${searchRadius},${lat},${lng});nwr["healthcare"="trauma"](around:${searchRadius},${lat},${lng});nwr["emergency"="yes"](around:${searchRadius},${lat},${lng});nwr["name"~"Trauma|Emergency|Accident|Critical",i](around:${searchRadius},${lat},${lng});`, color: '#c026d3', icon: 'fa-procedures' },
+        { key: 'clinic', type: 'Clinic', searchText: 'clinic doctor care', buildQuery: searchRadius => `nwr["amenity"="clinic"](around:${searchRadius},${lat},${lng});nwr["healthcare"="clinic"](around:${searchRadius},${lat},${lng});nwr["healthcare"="doctor"](around:${searchRadius},${lat},${lng});nwr["name"~"Clinic|Doctor|Care",i](around:${searchRadius},${lat},${lng});`, color: '#059669', icon: 'fa-clinic-medical' },
+        { key: 'ambulance', type: 'Ambulance Service', searchText: 'ambulance service', buildQuery: searchRadius => `nwr["amenity"="ambulance_station"](around:${searchRadius},${lat},${lng});nwr["emergency"="ambulance_station"](around:${searchRadius},${lat},${lng});nwr["emergency"="ambulance"](around:${searchRadius},${lat},${lng});nwr["name"~"Ambulance",i](around:${searchRadius},${lat},${lng});`, color: '#0284c7', icon: 'fa-ambulance' },
+        { key: 'mechanics', type: 'Mechanic', searchText: 'mechanic car repair towing', buildQuery: searchRadius => `nwr["shop"="car_repair"](around:${searchRadius},${lat},${lng});nwr["shop"="tyres"](around:${searchRadius},${lat},${lng});nwr["amenity"="car_repair"](around:${searchRadius},${lat},${lng});nwr["name"~"Mechanic|Towing|Tow|Breakdown|Roadside|Repair",i](around:${searchRadius},${lat},${lng});`, color: '#d97706', icon: 'fa-tools' },
+        { key: 'puncture', type: 'Puncture Shop', searchText: 'puncture tyre tire tube', buildQuery: searchRadius => `nwr["shop"="tyres"](around:${searchRadius},${lat},${lng});nwr["name"~"Puncture|Tyre|Tire|Tube",i](around:${searchRadius},${lat},${lng});`, color: '#f97316', icon: 'fa-circle-notch' },
+        { key: 'showroom', type: 'Showroom', searchText: 'vehicle showroom car dealer motors', buildQuery: searchRadius => `nwr["shop"="car_dealer"](around:${searchRadius},${lat},${lng});nwr["shop"="motorcycle"](around:${searchRadius},${lat},${lng});nwr["name"~"Showroom|Dealer|Motors",i](around:${searchRadius},${lat},${lng});`, color: '#0ea5e9', icon: 'fa-store' }
     ];
 
     let totalContacts = 0;
-    totalContacts += await fetchRegisteredOrganizations(categories, radius, lat, lng);
-    for (const cat of categories) {
-        const checkbox = document.getElementById(cat.id);
-        if (checkbox && checkbox.checked) {
-            const count = await fetchResources(cat);
-            totalContacts += count;
-        }
+    if (activeSupportResource === 'orgs') {
+        totalContacts += await fetchRegisteredOrganizations(radius, lat, lng, requestId);
+    } else {
+        const cat = categories.find(item => item.key === activeSupportResource) || categories[0];
+        totalContacts += await fetchResources(cat, Number(radius), requestId);
     }
+    if (requestId !== mapSearchRequestId) return;
     const contactsEl = document.getElementById('stat-contacts');
     if (contactsEl) contactsEl.innerText = totalContacts;
 }
 
-async function fetchRegisteredOrganizations(categories, radius, lat, lng) {
-    const showOrgs = document.getElementById('check-orgs')?.checked;
-    if (!showOrgs) return 0;
-
+async function fetchRegisteredOrganizations(radius, lat, lng, requestId) {
     try {
         const response = await fetch(`${API_BASE}/organizations`);
         if (response.ok) {
@@ -714,6 +839,7 @@ async function fetchRegisteredOrganizations(categories, radius, lat, lng) {
 
     let count = 0;
     registeredOrgCache.forEach(org => {
+        if (requestId !== mapSearchRequestId) return;
         if (!org.lat || !org.lng) return;
         const meta = getOrgCategoryMeta(org.category);
         const distance = getDistanceMeters(lat, lng, org.lat, org.lng);
@@ -722,6 +848,9 @@ async function fetchRegisteredOrganizations(categories, radius, lat, lng) {
         renderRegisteredOrgMarker(org, meta, distance);
         count += 1;
     });
+
+    const statusEl = document.getElementById('support-resource-status');
+    if (statusEl && requestId === mapSearchRequestId) statusEl.innerText = `Showing nearby verified organisations. Found ${count} contacts.`;
     return count;
 }
 
@@ -737,13 +866,8 @@ function getDistanceMeters(lat1, lng1, lat2, lng2) {
 }
 
 function setSupportResource(type) {
-    const filters = ['check-hospital', 'check-police', 'check-trauma', 'check-clinic', 'check-ambulance', 'check-mechanics', 'check-puncture', 'check-showroom', 'check-orgs'];
-    filters.forEach(id => {
-        const el = document.getElementById(id);
-        if (el) el.checked = false;
-    });
+    activeSupportResource = type;
 
-    // Update active button styling
     const allBtns = ['hospital','police','trauma','clinic','ambulance','mechanics','puncture','showroom','orgs'];
     allBtns.forEach(t => {
         const btn = document.getElementById(`btn-${t}`);
@@ -751,18 +875,6 @@ function setSupportResource(type) {
     });
     const activeBtn = document.getElementById(`btn-${type}`);
     if (activeBtn) activeBtn.classList.add('active');
-
-    const typeToCheckbox = {
-        hospital:   'check-hospital',
-        police:     'check-police',
-        trauma:     'check-trauma',
-        clinic:     'check-clinic',
-        ambulance:  'check-ambulance',
-        mechanics:  'check-mechanics',
-        puncture:   'check-puncture',
-        showroom:   'check-showroom',
-        orgs:       'check-orgs'
-    };
 
     const typeToLabel = {
         hospital:   'Hospitals',
@@ -776,25 +888,18 @@ function setSupportResource(type) {
         orgs:       'Verified Organisations'
     };
 
-    const checkboxId = typeToCheckbox[type];
-    if (checkboxId) {
-        const el = document.getElementById(checkboxId);
-        if (el) el.checked = true;
-    }
-
     const label = typeToLabel[type] || type;
     const statusEl = document.getElementById('support-resource-status');
-    if (statusEl) statusEl.innerText = `Showing nearby ${label} only. This search is separate from SOS broadcasts.`;
+    if (statusEl) statusEl.innerText = userLocation
+        ? `Searching nearby ${label}...`
+        : `Selected ${label}. Waiting for your location to search nearby resources.`;
 
     updateMap();
 }
 
 function attachMapFilterListeners() {
-    const ids = ['radius-select', 'check-hospital', 'check-police', 'check-trauma', 'check-clinic', 'check-ambulance', 'check-mechanics', 'check-puncture', 'check-showroom', 'check-orgs'];
-    ids.forEach(id => {
-        const el = document.getElementById(id);
-        if (el) el.addEventListener('change', updateMap);
-    });
+    const radiusSelect = document.getElementById('radius-select');
+    if (radiusSelect) radiusSelect.addEventListener('change', updateMap);
 }
 
 function renderRegisteredOrgMarker(org, meta, distance) {
@@ -816,25 +921,89 @@ function renderRegisteredOrgMarker(org, meta, distance) {
     registeredOrgMarkers.push(marker);
 }
 
-async function fetchResources(cat) {
-    const url = `https://overpass-api.de/api/interpreter?data=${encodeURIComponent('[out:json][timeout:25];(' + cat.query + ');out center;')}`;
+async function fetchResources(cat, radius, requestId) {
+    const statusEl = document.getElementById('support-resource-status');
+    if (statusEl) statusEl.innerText = `Searching nearby ${cat.type} contacts...`;
+
     try {
-        const response = await fetch(url);
-        const data = await response.json();
-        resourceCache[cat.type] = data.elements;
+        const { elements, usedRadius, source } = await searchNearbyResources(cat, radius, requestId);
+
+        if (requestId !== mapSearchRequestId) return 0;
+        resourceCache[cat.type] = elements;
         resourceCache[`${cat.type}_fetchedAt`] = Date.now();
         localStorage.setItem(CACHE_RESOURCES_KEY, JSON.stringify(resourceCache));
-        data.elements.forEach(el => renderMarker(el, cat));
-        const statusEl = document.getElementById('support-resource-status');
-        if (statusEl) statusEl.innerText = `Showing nearby ${cat.type}. Found ${data.elements.length} contacts.`;
-        return data.elements.length;
+        elements.forEach(el => renderMarker(el, cat));
+        if (statusEl) {
+            const radiusText = usedRadius > radius ? ` within ${(usedRadius / 1000).toFixed(0)} KM` : '';
+            const sourceText = source === 'nominatim' ? ' from fallback search' : '';
+            statusEl.innerText = `Showing nearby ${cat.type}${radiusText}${sourceText}. Found ${elements.length} contacts.`;
+        }
+        return elements.length;
     } catch (e) {
+        if (requestId !== mapSearchRequestId) return 0;
         const cached = resourceCache[cat.type] || [];
         cached.forEach(el => renderMarker(el, cat));
-        const statusEl = document.getElementById('support-resource-status');
-        if (statusEl) statusEl.innerText = `Showing cached ${cat.type}. ${cached.length} contacts available.`;
+        if (statusEl) statusEl.innerText = cached.length
+            ? `Showing cached ${cat.type}. ${cached.length} contacts available.`
+            : `No ${cat.type} contacts found right now. Try increasing radius or check your internet connection.`;
         return cached.length;
     }
+}
+
+async function searchNearbyResources(cat, radius, requestId) {
+    const searchRadii = [radius, 10000, 20000, 50000].filter((item, index, list) => item && list.indexOf(item) === index && item >= radius);
+
+    for (const searchRadius of searchRadii) {
+        if (requestId !== mapSearchRequestId) return { elements: [], usedRadius: searchRadius, source: 'cancelled' };
+        const query = typeof cat.buildQuery === 'function' ? cat.buildQuery(searchRadius) : cat.query;
+        const overpassPayload = `[out:json][timeout:8];(${query});out center;`;
+
+        for (const endpoint of OVERPASS_ENDPOINTS) {
+            try {
+                const url = `${endpoint}?data=${encodeURIComponent(overpassPayload)}`;
+                const response = await fetchWithTimeout(url);
+                if (!response.ok) continue;
+                const data = await response.json();
+                if (data.elements?.length) {
+                    return { elements: data.elements, usedRadius: searchRadius, source: 'overpass' };
+                }
+            } catch (e) {
+                console.warn(`Resource search failed on ${endpoint}`, e.message || e);
+            }
+        }
+    }
+
+    return searchNominatimResources(cat, Math.max(radius, 20000), requestId);
+}
+
+async function searchNominatimResources(cat, radius, requestId) {
+    if (!userLocation || requestId !== mapSearchRequestId) {
+        return { elements: [], usedRadius: radius, source: 'nominatim' };
+    }
+
+    const latDelta = radius / 111320;
+    const lngDelta = radius / (111320 * Math.cos(userLocation.lat * Math.PI / 180));
+    const left = userLocation.lng - lngDelta;
+    const right = userLocation.lng + lngDelta;
+    const top = userLocation.lat + latDelta;
+    const bottom = userLocation.lat - latDelta;
+    const url = `https://nominatim.openstreetmap.org/search?format=jsonv2&limit=25&bounded=1&addressdetails=1&q=${encodeURIComponent(cat.searchText || cat.type)}&viewbox=${left},${top},${right},${bottom}`;
+
+    const response = await fetchWithTimeout(url);
+    if (!response.ok) return { elements: [], usedRadius: radius, source: 'nominatim' };
+    const places = await response.json();
+    const elements = places.map((place, index) => ({
+        id: place.osm_id || `${cat.key}-${index}`,
+        lat: Number(place.lat),
+        lon: Number(place.lon),
+        tags: {
+            name: place.name || place.display_name?.split(',')[0] || `${cat.type} result`,
+            phone: place.extratags?.phone || place.extratags?.['contact:phone'],
+            address: place.display_name
+        }
+    })).filter(place => Number.isFinite(place.lat) && Number.isFinite(place.lon));
+
+    return { elements, usedRadius: radius, source: 'nominatim' };
 }
 
 function renderMarker(el, cat) {
@@ -844,6 +1013,7 @@ function renderMarker(el, cat) {
 
     const name = el.tags.name || `Unnamed ${cat.type}`;
     const phone = el.tags.phone || el.tags['contact:phone'] || 'No contact number available';
+    const address = el.tags.address || el.tags['addr:full'] || '';
     const markerIcon = L.divIcon({
         className: 'custom-marker',
         html: `<div style="background-color:${cat.color}; color:white; width:30px; height:30px; border-radius:50%; display:flex; align-items:center; justify-content:center; border:2px solid white; box-shadow:0 2px 5px rgba(0,0,0,0.3)"><i class="fas ${cat.icon} text-xs"></i></div>`,
@@ -851,7 +1021,7 @@ function renderMarker(el, cat) {
     });
 
     L.marker([lat, lon], { icon: markerIcon }).addTo(map)
-        .bindPopup(`<b>${name}</b><br><span class="text-xs font-bold text-slate-500 uppercase">${cat.type}</span><br><a href="tel:${phone}" class="text-blue-600 font-bold underline">${phone}</a>`);
+        .bindPopup(`<b>${name}</b><br><span class="text-xs font-bold text-slate-500 uppercase">${cat.type}</span><br>${address ? `<span>${address}</span><br>` : ''}<a href="tel:${phone}" class="text-blue-600 font-bold underline">${phone}</a>`);
 }
 
 // --- SOS Logic ---
@@ -1514,6 +1684,7 @@ window.onload = () => {
     if (cachedUser) {
         currentUser = cachedUser;
         showSection(currentUser.role === 'user' ? 'user-dashboard' : 'org-dashboard');
+        if (currentUser.role === 'user') promptForMissingProfileInfo();
     } else {
         content.classList.remove('blur-out');
         document.getElementById('home-section').classList.remove('hidden');
