@@ -81,8 +81,8 @@ const APP_BASE_URL = process.env.PRODUCTION_URL || process.env.RENDER_EXTERNAL_U
 const transporter = APP_PASSWORD
     ? nodemailer.createTransport({
     host: 'smtp.gmail.com',
-    port: 465,
-    secure: true,
+    port: 587,
+    secure: false,
     auth: {
         user: SUPPORT_EMAIL,
         pass: APP_PASSWORD
