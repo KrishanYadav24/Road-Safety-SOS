@@ -86,7 +86,7 @@ async function sendVerificationEmail(user, baseUrl = APP_BASE_URL) {
     const verificationLink = `${normalizedBaseUrl}/api/verify/${user.verificationToken}`;
 
     const { error } = await resend.emails.send({
-        from: 'RoadSafetySoS <onboarding@resend.dev>',
+        from: 'RoadSafetySoS <noreply@stigz.xyz>',
         to: user.email,
         subject: 'Complete Your Registration - RoadSafetySoS',
         html: `
