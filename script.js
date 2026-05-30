@@ -1,4 +1,5 @@
 let map, userMarker, orgMap, orgMarkers = [];
+let orgLocationMarker = null;
 let userLocation = null;
 let currentUser = null;
 let registeredOrgMarkers = [];
@@ -6,6 +7,19 @@ let tempOrgData = null;
 let onboardingMap = null;
 let onboardingMarker = null;
 let onboardingCoords = null;
+let selectedSOS = null;
+let currentResponderLocation = null;
+let selectedSOSMarker = null;
+let responderMarker = null;
+let orgAlerts = {};
+let sosCircle = null;
+let activeSOS = null;
+let activeSOSPollingTimer = null;
+let sosAttendedNotified = false;
+let sosRadiusIndex = 0;
+let sosTimer = null;
+const SOS_RADII = [1000, 2000, 3000, 4000, 5000];
+const SOS_POLL_INTERVAL = 5000;
 
 // Determine API Base URL based on environment
 // Update the Render URL if your backend is deployed at a different address
@@ -18,10 +32,36 @@ const SOS_QUEUE_KEY = 'roadsafetysos_sos_queue';
 const CACHE_RESOURCES_KEY = 'roadsafetysos_resource_cache';
 const CACHE_ORGS_KEY = 'roadsafetysos_registered_org_cache';
 
+const ORG_CATEGORY_META = {
+    hospital: { color: '#dc2626', icon: 'fa-hospital', label: 'Hospital' },
+    police: { color: '#1e40af', icon: 'fa-shield-alt', label: 'Police Station' },
+    clinic: { color: '#16a34a', icon: 'fa-clinic-medical', label: 'Clinic' },
+    'ambulance service': { color: '#0284c7', icon: 'fa-ambulance', label: 'Ambulance Service' },
+    'emergency center': { color: '#eab308', icon: 'fa-bell-on', label: 'Emergency Center' },
+    ngo: { color: '#7c3aed', icon: 'fa-hands-praying', label: 'NGO' },
+    'repair/towing': { color: '#92400e', icon: 'fa-tools', label: 'Repair & Towing' }
+};
+
+function getOrgCategoryMeta(category) {
+    if (!category) return { color: '#475569', icon: 'fa-building', label: 'Organization' };
+    const key = category.trim().toLowerCase();
+    return ORG_CATEGORY_META[key] || { color: '#475569', icon: 'fa-building', label: category };
+}
+
 // Load cached data on startup
 let sosQueue = JSON.parse(localStorage.getItem(SOS_QUEUE_KEY)) || [];
 let resourceCache = JSON.parse(localStorage.getItem(CACHE_RESOURCES_KEY)) || {};
 let registeredOrgCache = JSON.parse(localStorage.getItem(CACHE_ORGS_KEY)) || [];
+
+// Helper to call API with stored JWT token
+async function apiFetch(path, options = {}) {
+    const token = localStorage.getItem('auth_token');
+    const headers = options.headers || {};
+    if (!headers['Content-Type'] && !(options.body instanceof FormData)) headers['Content-Type'] = 'application/json';
+    if (token) headers['Authorization'] = 'Bearer ' + token;
+    options.headers = headers;
+    return fetch(API_BASE + path, options);
+}
 
 // --- Custom Modal Logic ---
 let modalCallback = null;
@@ -32,10 +72,15 @@ function showAlert(title, message, type = 'info', callback = null) {
     const msgEl = document.getElementById('modal-message');
     const iconContainer = document.getElementById('modal-icon');
     const btn = document.getElementById('modal-btn');
+    const cancelBtn = document.getElementById('modal-cancel-btn');
 
     modalCallback = callback;
     titleEl.innerText = title;
     msgEl.innerHTML = message;
+
+    // Reset buttons
+    btn.onclick = closeModal;
+    if (cancelBtn) cancelBtn.classList.add('hidden');
 
     iconContainer.className = "w-20 h-20 rounded-full flex items-center justify-center mx-auto mb-6 ";
 
@@ -52,6 +97,36 @@ function showAlert(title, message, type = 'info', callback = null) {
         iconContainer.classList.add('bg-blue-100', 'text-blue-600');
         iconContainer.innerHTML = '<i class="fas fa-info-circle text-4xl"></i>';
     }
+
+    modal.classList.remove('hidden');
+    setTimeout(() => modal.classList.add('modal-active'), 10);
+}
+
+function showConfirm(title, message, onConfirm, onCancel = null) {
+    const modal = document.getElementById('custom-modal');
+    const titleEl = document.getElementById('modal-title');
+    const msgEl = document.getElementById('modal-message');
+    const iconContainer = document.getElementById('modal-icon');
+    const okBtn = document.getElementById('modal-btn');
+    const cancelBtn = document.getElementById('modal-cancel-btn');
+
+    titleEl.innerText = title;
+    msgEl.innerHTML = message;
+
+    iconContainer.className = "w-20 h-20 rounded-full flex items-center justify-center mx-auto mb-6 bg-blue-100 text-blue-600";
+    iconContainer.innerHTML = '<i class="fas fa-question-circle text-4xl"></i>';
+
+    cancelBtn.classList.remove('hidden');
+
+    okBtn.onclick = () => {
+        closeModal();
+        if (onConfirm) onConfirm();
+    };
+
+    cancelBtn.onclick = () => {
+        closeModal();
+        if (onCancel) onCancel();
+    };
 
     modal.classList.remove('hidden');
     setTimeout(() => modal.classList.add('modal-active'), 10);
@@ -97,8 +172,10 @@ function showSection(sectionId) {
         if (sectionId === 'user-dashboard') {
             initUserMap();
             requestLocation();
+            fetchUserHistory();
         } else if (sectionId === 'org-dashboard') {
             initOrgMap();
+            renderOrgLocationMarker();
             refreshOrgDashboard();
         }
 
@@ -194,6 +271,82 @@ function showTeamModal() {
             <div class="flex items-center"><i class="fas fa-user-circle mr-3 text-blue-500"></i> Vinayak Tripathi</div>
         </div>
     `, 'info');
+}
+
+function toggleProfile() {
+    const modal = document.getElementById('profile-modal');
+    if (!currentUser) return showAlert('Not logged in', 'Please login to edit your profile.', 'warning');
+    if (modal.classList.contains('hidden')) {
+        // populate fields
+        document.getElementById('profile-name').value = currentUser.name || '';
+        document.getElementById('profile-phone').value = currentUser.phone || '';
+        document.getElementById('profile-email').value = currentUser.email || '';
+        document.getElementById('profile-category').value = currentUser.category || '';
+        document.getElementById('profile-photo').value = currentUser.photoUrl || '';
+        document.getElementById('profile-lat').value = currentUser.lat || '';
+        document.getElementById('profile-lng').value = currentUser.lng || '';
+        document.getElementById('profile-address').value = currentUser.address || '';
+        document.getElementById('profile-password').value = '';
+
+        modal.classList.remove('hidden');
+        setTimeout(() => modal.classList.add('modal-active'), 10);
+    } else {
+        closeProfileModal();
+    }
+}
+
+function closeProfileModal() {
+    const modal = document.getElementById('profile-modal');
+    if (!modal) return;
+    modal.classList.remove('modal-active');
+    setTimeout(() => modal.classList.add('hidden'), 200);
+}
+
+async function saveProfile(e) {
+    e.preventDefault();
+    const updates = {};
+    ['name','phone','category','photo','lat','lng','address','password'].forEach(k=>{});
+    const name = document.getElementById('profile-name').value;
+    const phone = document.getElementById('profile-phone').value;
+    const category = document.getElementById('profile-category').value;
+    const photoUrl = document.getElementById('profile-photo').value;
+    const lat = parseFloat(document.getElementById('profile-lat').value) || undefined;
+    const lng = parseFloat(document.getElementById('profile-lng').value) || undefined;
+    const address = document.getElementById('profile-address').value;
+    const password = document.getElementById('profile-password').value;
+
+    if (name) updates.name = name;
+    if (phone) updates.phone = phone;
+    if (category) updates.category = category;
+    if (photoUrl) updates.photoUrl = photoUrl;
+    if (lat !== undefined) updates.lat = lat;
+    if (lng !== undefined) updates.lng = lng;
+    if (address) updates.address = address;
+    if (password) updates.password = password;
+
+    try {
+        const response = await apiFetch('/profile', { method: 'PUT', body: JSON.stringify({ email: currentUser.email, updates }) });
+        const data = await response.json();
+        if (!response.ok) throw new Error(data.message || 'Update failed');
+        currentUser = data.user;
+        localStorage.setItem('cached_user', JSON.stringify(currentUser));
+        showAlert('Saved', 'Profile updated successfully.', 'success');
+        closeProfileModal();
+        // update UI
+        document.getElementById('user-display-name').innerText = currentUser.name;
+        renderOrgLocationMarker();
+    } catch (err) {
+        console.error('Profile update failed', err);
+        showAlert('Update Failed', err.message || 'Unable to update profile right now.', 'error');
+    }
+}
+
+function useMyLocationForProfile() {
+    if (!navigator.geolocation) return showAlert('Geolocation', 'Geolocation not supported.', 'error');
+    navigator.geolocation.getCurrentPosition(pos => {
+        document.getElementById('profile-lat').value = pos.coords.latitude;
+        document.getElementById('profile-lng').value = pos.coords.longitude;
+    }, () => showAlert('Location Denied', 'Please enable location access to use this feature.', 'error'), { enableHighAccuracy: true });
 }
 
 function handleGetStarted() {
@@ -343,10 +496,10 @@ function requestOrganizationLocation() {
             lng: position.coords.longitude
         };
         closeModal();
-        
+
         document.getElementById('organization-location-step').classList.add('hidden');
         document.getElementById('new-organization-step').classList.remove('hidden');
-        
+
         initOnboardingMap();
     }, () => {
         showAlert('Location Denied', 'Please enable location access to continue onboarding.', 'error');
@@ -355,7 +508,7 @@ function requestOrganizationLocation() {
 
 function initOnboardingMap() {
     if (!onboardingCoords) return;
-    
+
     document.getElementById('new-org-name').value = tempOrgData.name;
     document.getElementById('new-org-lat-display').innerText = `Lat: ${onboardingCoords.lat.toFixed(6)}`;
     document.getElementById('new-org-lng-display').innerText = `Lng: ${onboardingCoords.lng.toFixed(6)}`;
@@ -371,7 +524,7 @@ function initOnboardingMap() {
         L.tileLayer('https://{s}.tile.osm.org/{z}/{x}/{y}.png').addTo(onboardingMap);
 
         onboardingMarker = L.marker([onboardingCoords.lat, onboardingCoords.lng], { draggable: true }).addTo(onboardingMap);
-        
+
         onboardingMarker.on('dragend', function () {
             const position = onboardingMarker.getLatLng();
             onboardingCoords.lat = position.lat;
@@ -461,6 +614,7 @@ async function handleLogin() {
         const data = await response.json();
         if (response.ok) {
             currentUser = data.user;
+            if (data.token) localStorage.setItem('auth_token', data.token);
             localStorage.setItem('cached_user', JSON.stringify(currentUser));
             showSection(role === 'user' ? 'user-dashboard' : 'org-dashboard');
             updateGlobalStats();
@@ -482,6 +636,7 @@ async function handleLogin() {
 function logout() {
     currentUser = null;
     localStorage.removeItem('cached_user');
+    localStorage.removeItem('auth_token');
     showSection('home-section');
 }
 
@@ -521,15 +676,16 @@ async function updateMap() {
 
     const categories = [
         { id: 'check-hospital', type: 'Hospital', query: `nwr["amenity"="hospital"](around:${radius},${lat},${lng});`, color: '#dc2626', icon: 'fa-hospital' },
-        { id: 'check-police', type: 'Police', query: `nwr["amenity"="police"](around:${radius},${lat},${lng});`, color: '#1e40af', icon: 'fa-shield-alt' },
-        { id: 'check-trauma', type: 'Trauma Centre', query: `(nwr["amenity"="hospital"]["emergency"="yes"](around:${radius},${lat},${lng}); nwr["emergency"="yes"](around:${radius},${lat},${lng}); nwr["name"~"Trauma",i](around:${radius},${lat},${lng}););`, color: '#991b1b', icon: 'fa-ambulance' },
-        { id: 'check-towing', type: 'Repair/Towing', query: `(nwr["shop"="car_repair"](around:${radius},${lat},${lng}); nwr["shop"="tyres"](around:${radius},${lat},${lng}); nwr["amenity"="car_repair"](around:${radius},${lat},${lng}); nwr["name"~"Towing",i](around:${radius},${lat},${lng}); nwr["name"~"Puncture",i](around:${radius},${lat},${lng}););`, color: '#92400e', icon: 'fa-tools' },
-        { id: 'check-clinics', type: 'Clinic', query: `nwr["amenity"="clinic"](around:${radius},${lat},${lng});`, color: '#059669', icon: 'fa-clinic-medical' }
+        { id: 'check-police', type: 'Police', query: `(nwr["amenity"="police"](around:${radius},${lat},${lng}); nwr["name"~"Police",i](around:${radius},${lat},${lng}););`, color: '#1e40af', icon: 'fa-shield-alt' },
+        { id: 'check-trauma', type: 'Trauma Center', query: `(nwr["emergency"="trauma"](around:${radius},${lat},${lng}); nwr["healthcare"="trauma"](around:${radius},${lat},${lng}); nwr["name"~"Trauma",i](around:${radius},${lat},${lng}););`, color: '#c026d3', icon: 'fa-procedures' },
+        { id: 'check-clinic', type: 'Clinic', query: `(nwr["amenity"="clinic"](around:${radius},${lat},${lng}); nwr["healthcare"="clinic"](around:${radius},${lat},${lng}); nwr["name"~"Clinic",i](around:${radius},${lat},${lng}););`, color: '#059669', icon: 'fa-clinic-medical' },
+        { id: 'check-ambulance', type: 'Ambulance Service', query: `(nwr["amenity"="ambulance"](around:${radius},${lat},${lng}); nwr["name"~"Ambulance",i](around:${radius},${lat},${lng}););`, color: '#0284c7', icon: 'fa-ambulance' },
+        { id: 'check-mechanics', type: 'Mechanic', query: `(nwr["shop"="car_repair"](around:${radius},${lat},${lng}); nwr["shop"="tyres"](around:${radius},${lat},${lng}); nwr["amenity"="car_repair"](around:${radius},${lat},${lng}); nwr["name"~"Mechanic|Towing|Tow|Breakdown|Roadside",i](around:${radius},${lat},${lng}););`, color: '#d97706', icon: 'fa-tools' },
+        { id: 'check-puncture', type: 'Puncture Shop', query: `(nwr["shop"="tyres"](around:${radius},${lat},${lng}); nwr["name"~"Puncture|Tyre|Tube",i](around:${radius},${lat},${lng}););`, color: '#f97316', icon: 'fa-circle-notch' },
+        { id: 'check-showroom', type: 'Showroom', query: `(nwr["shop"="car_dealer"](around:${radius},${lat},${lng}); nwr["name"~"Showroom|Dealer",i](around:${radius},${lat},${lng}););`, color: '#0ea5e9', icon: 'fa-store' }
     ];
 
     let totalContacts = 0;
-    // Note: The /api/organizations endpoint was not explicitly defined in server.js but used here.
-    // For deployment, ensure it exists or handles errors gracefully.
     totalContacts += await fetchRegisteredOrganizations(categories, radius, lat, lng);
     for (const cat of categories) {
         const checkbox = document.getElementById(cat.id);
@@ -543,6 +699,9 @@ async function updateMap() {
 }
 
 async function fetchRegisteredOrganizations(categories, radius, lat, lng) {
+    const showOrgs = document.getElementById('check-orgs')?.checked;
+    if (!showOrgs) return 0;
+
     try {
         const response = await fetch(`${API_BASE}/organizations`);
         if (response.ok) {
@@ -555,14 +714,12 @@ async function fetchRegisteredOrganizations(categories, radius, lat, lng) {
 
     let count = 0;
     registeredOrgCache.forEach(org => {
-        const cat = categories.find(item => item.id === `check-${org.category}`);
-        const checkbox = cat && document.getElementById(cat.id);
-        if (!cat || !checkbox?.checked || !org.lat || !org.lng) return;
-
+        if (!org.lat || !org.lng) return;
+        const meta = getOrgCategoryMeta(org.category);
         const distance = getDistanceMeters(lat, lng, org.lat, org.lng);
         if (distance > Number(radius)) return;
 
-        renderRegisteredOrgMarker(org, cat, distance);
+        renderRegisteredOrgMarker(org, meta, distance);
         count += 1;
     });
     return count;
@@ -579,10 +736,38 @@ function getDistanceMeters(lat1, lng1, lat2, lng2) {
     return earthRadius * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
 }
 
-function renderRegisteredOrgMarker(org, cat, distance) {
+function setSupportResource(type) {
+    const filters = ['check-hospital', 'check-police', 'check-trauma', 'check-clinic', 'check-ambulance', 'check-mechanics', 'check-puncture', 'check-showroom', 'check-orgs'];
+    filters.forEach(id => {
+        const el = document.getElementById(id);
+        if (el) el.checked = false;
+    });
+
+    const selectedId = type === 'trauma' ? 'check-trauma' : type === 'clinic' ? 'check-clinic' : 'check-mechanics';
+    const selected = document.getElementById(selectedId);
+    if (selected) selected.checked = true;
+
+    const statusText = type === 'trauma'
+        ? 'Showing nearby Trauma Centers only. This search is separate from SOS broadcasts.'
+        : type === 'clinic'
+            ? 'Showing nearby Clinics only. This search is separate from SOS broadcasts.'
+            : 'Showing nearby Mechanics only. This search is separate from SOS broadcasts.';
+    document.getElementById('support-resource-status').innerText = statusText;
+    updateMap();
+}
+
+function attachMapFilterListeners() {
+    const ids = ['radius-select', 'check-hospital', 'check-police', 'check-trauma', 'check-clinic', 'check-ambulance', 'check-mechanics', 'check-puncture', 'check-showroom', 'check-orgs'];
+    ids.forEach(id => {
+        const el = document.getElementById(id);
+        if (el) el.addEventListener('change', updateMap);
+    });
+}
+
+function renderRegisteredOrgMarker(org, meta, distance) {
     const markerIcon = L.divIcon({
         className: 'custom-marker registered-org-marker',
-        html: `<div style="background-color:${cat.color}; color:white; width:36px; height:36px; border-radius:12px; display:flex; align-items:center; justify-content:center; border:3px solid white; box-shadow:0 4px 10px rgba(0,0,0,0.35)"><i class="fas ${cat.icon} text-sm"></i></div>`,
+        html: `<div style="background-color:${meta.color}; color:white; width:36px; height:36px; border-radius:12px; display:flex; align-items:center; justify-content:center; border:3px solid white; box-shadow:0 4px 10px rgba(0,0,0,0.35)"><i class="fas ${meta.icon} text-sm"></i></div>`,
         iconSize: [36, 36]
     });
 
@@ -590,7 +775,7 @@ function renderRegisteredOrgMarker(org, cat, distance) {
     const marker = L.marker([org.lat, org.lng], { icon: markerIcon }).addTo(map)
         .bindPopup(`
             <b>${org.name}</b><br>
-            <span class="text-xs font-bold text-slate-500 uppercase">Registered ${cat.type}</span><br>
+            <span class="text-xs font-bold text-slate-500 uppercase">${meta.label}</span><br>
             <span>${org.address || 'Address not available'}</span><br>
             <span>${(distance / 1000).toFixed(1)} km away</span><br>
             <a href="tel:${phone}" class="text-blue-600 font-bold underline">${phone}</a>
@@ -604,12 +789,17 @@ async function fetchResources(cat) {
         const response = await fetch(url);
         const data = await response.json();
         resourceCache[cat.type] = data.elements;
+        resourceCache[`${cat.type}_fetchedAt`] = Date.now();
         localStorage.setItem(CACHE_RESOURCES_KEY, JSON.stringify(resourceCache));
         data.elements.forEach(el => renderMarker(el, cat));
+        const statusEl = document.getElementById('support-resource-status');
+        if (statusEl) statusEl.innerText = `Showing nearby ${cat.type}. Found ${data.elements.length} contacts.`;
         return data.elements.length;
     } catch (e) {
         const cached = resourceCache[cat.type] || [];
         cached.forEach(el => renderMarker(el, cat));
+        const statusEl = document.getElementById('support-resource-status');
+        if (statusEl) statusEl.innerText = `Showing cached ${cat.type}. ${cached.length} contacts available.`;
         return cached.length;
     }
 }
@@ -632,40 +822,67 @@ function renderMarker(el, cat) {
 }
 
 // --- SOS Logic ---
-async function triggerSOS() {
+function triggerSOS() {
     if (!userLocation || !currentUser) return showAlert('Missing Info', 'Location access and active login are required to trigger a full SOS alert.', 'warning');
 
-    const alertData = {
-        id: Date.now(), userName: currentUser.name, userPhone: currentUser.phone,
-        lat: userLocation.lat, lng: userLocation.lng,
-        time: new Date().toLocaleTimeString(), date: new Date().toLocaleDateString(),
-        type: 'login'
-    };
+    showConfirm('Police SOS?', 'Do you want to also raise a Police SOS? This will notify nearby police stations in addition to your emergency broadcast.',
+        () => { // User clicked OK
+            sendSOSWithPolice(true);
+        },
+        () => { // User clicked Cancel
+            sendSOSWithPolice(false);
+        }
+    );
 
-    handleSOSSend(alertData);
-}
-
-async function triggerEmergencySOS() {
-    if (!navigator.geolocation) return showAlert('Error', 'Geolocation is not supported by your browser.', 'error');
-
-    showAlert('Broadcasting...', 'Fetching your precise location for emergency services...', 'info');
-
-    navigator.geolocation.getCurrentPosition(position => {
+    function sendSOSWithPolice(policeRequested) {
         const alertData = {
-            id: Date.now(), userName: 'Emergency User', userPhone: 'N/A',
-            lat: position.coords.latitude, lng: position.coords.longitude,
+            id: Date.now(), userEmail: currentUser.email, userName: currentUser.name, userPhone: currentUser.phone,
+            lat: userLocation.lat, lng: userLocation.lng,
             time: new Date().toLocaleTimeString(), date: new Date().toLocaleDateString(),
-            type: 'emergency'
+            type: 'login',
+            policeSOS: policeRequested,
+            currentRadius: 0,
+            notifiedOrgCount: 0
         };
         handleSOSSend(alertData);
-    }, () => {
-        showAlert('Location Denied', 'Please enable location access to use Emergency SOS.', 'error');
-    }, { enableHighAccuracy: true });
+    }
+}
+
+function triggerEmergencySOS() {
+    if (!navigator.geolocation) return showAlert('Error', 'Geolocation is not supported by your browser.', 'error');
+
+    showConfirm('Police SOS?', 'Do you want to also raise a Police SOS? This will notify nearby police stations in addition to your emergency broadcast.',
+        () => { // User clicked OK
+            sendEmergencyWithPolice(true);
+        },
+        () => { // User clicked Cancel
+            sendEmergencyWithPolice(false);
+        }
+    );
+
+    function sendEmergencyWithPolice(policeRequested) {
+        showAlert('Broadcasting...', 'Fetching your precise location for emergency services...', 'info');
+
+        navigator.geolocation.getCurrentPosition(position => {
+            const alertData = {
+                id: Date.now(), userEmail: currentUser?.email, userName: 'Emergency User', userPhone: 'N/A',
+                lat: position.coords.latitude, lng: position.coords.longitude,
+                time: new Date().toLocaleTimeString(), date: new Date().toLocaleDateString(),
+                type: 'emergency',
+                policeSOS: policeRequested,
+                currentRadius: 0,
+                notifiedOrgCount: 0
+            };
+            handleSOSSend(alertData);
+        }, () => {
+            showAlert('Location Denied', 'Please enable location access to use Emergency SOS.', 'error');
+        }, { enableHighAccuracy: true });
+    }
 }
 
 function handleSOSSend(alertData) {
     if (navigator.onLine) {
-        sendSOS(alertData);
+        createAndSendSOS(alertData);
     } else {
         sosQueue.push(alertData);
         localStorage.setItem(SOS_QUEUE_KEY, JSON.stringify(sosQueue));
@@ -673,26 +890,171 @@ function handleSOSSend(alertData) {
     }
 }
 
-async function sendSOS(data) {
+async function createAndSendSOS(data) {
     try {
         const response = await fetch(`${API_BASE}/sos`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify(data)
         });
-        if (response.ok) {
-            showAlert('SOS Broadcasted', 'Your emergency alert has been sent to responders.', 'success');
-            updateGlobalStats();
+        const result = await response.json();
+        if (!response.ok) throw new Error(result.message || 'SOS send failed');
 
-            if ('Notification' in window && Notification.permission === 'granted') {
-                new Notification('RoadSafetySoS', { body: 'SOS Broadcasted Successfully!', icon: '/logo.png' });
-            }
-        } else throw new Error();
+        activeSOS = result.alert;
+        showAlert('SOS Broadcasted', 'Your alert has been sent to responding organizations. Radius escalation will begin as needed.', 'success');
+        updateGlobalStats();
+        showSosStatusPanel();
+        startSosSequence();
+        startActiveSOSPolling();
+
+        if ('Notification' in window && Notification.permission === 'granted') {
+            new Notification('RoadSafetySoS', { body: 'SOS Broadcasted Successfully!', icon: '/logo.png' });
+        }
     } catch (e) {
         if (!sosQueue.find(q => q.id === data.id)) {
             sosQueue.push(data);
             localStorage.setItem(SOS_QUEUE_KEY, JSON.stringify(sosQueue));
         }
+        showAlert('SOS Queued', 'Unable to send the SOS right now. It will retry when the network returns.', 'warning');
+    }
+}
+
+async function refreshRegisteredOrgCache() {
+    try {
+        const response = await fetch(`${API_BASE}/organizations`);
+        if (response.ok) {
+            registeredOrgCache = await response.json();
+            localStorage.setItem(CACHE_ORGS_KEY, JSON.stringify(registeredOrgCache));
+        }
+    } catch (e) {
+        console.warn('Failed to refresh org cache.', e);
+    }
+}
+
+function getNotifiedOrgCount(radius) {
+    if (!registeredOrgCache || registeredOrgCache.length === 0) return 0;
+    return registeredOrgCache.reduce((count, org) => {
+        if (!org.lat || !org.lng) return count;
+        const distance = getDistanceMeters(activeSOS.lat, activeSOS.lng, org.lat, org.lng);
+        return distance <= radius ? count + 1 : count;
+    }, 0);
+}
+
+function showSosStatusPanel() {
+    document.getElementById('sos-status-panel')?.classList.remove('hidden');
+    updateSosStatusPanel();
+}
+
+function updateSosStatusPanel() {
+    if (!activeSOS) return;
+    document.getElementById('sos-current-status').innerText = activeSOS.status === 'attended'
+        ? 'A responder organization is on the way'
+        : activeSOS.policeSOS
+            ? 'Police SOS requested and broadcast is active'
+            : 'SOS broadcasting — waiting for organization response';
+    document.getElementById('sos-current-radius').innerText = `${activeSOS.currentRadius || 0} meters`;
+    document.getElementById('sos-notified-count').innerText = `${activeSOS.notifiedOrgCount || 0} organisations notified`;
+
+    if (activeSOS.attendingOrg && activeSOS.attendingOrg.name) {
+        document.getElementById('sos-attending-org').innerText = `${activeSOS.attendingOrg.name} (${activeSOS.attendingOrg.category || 'Responder'})`;
+    } else {
+        document.getElementById('sos-attending-org').innerText = activeSOS.policeSOS
+            ? 'Police stations are also alerted for this SOS'
+            : 'No organization has responded yet';
+    }
+
+    if (activeSOS.responderLocation && activeSOS.responderLocation.lat) {
+        document.getElementById('sos-responder-location').innerText = `${activeSOS.responderLocation.lat.toFixed(5)}, ${activeSOS.responderLocation.lng.toFixed(5)}`;
+        renderResponderMarker(activeSOS.responderLocation);
+    } else {
+        document.getElementById('sos-responder-location').innerText = 'Not shared yet';
+    }
+}
+
+function renderResponderMarker(location) {
+    if (!map || !location) return;
+    if (responderMarker) map.removeLayer(responderMarker);
+    responderMarker = L.marker([location.lat, location.lng], {
+        icon: L.divIcon({
+            className: 'custom-marker',
+            html: '<div style="background:#2563eb;color:white;width:36px;height:36px;border-radius:12px;display:flex;align-items:center;justify-content:center;border:3px solid white;box-shadow:0 4px 10px rgba(0,0,0,0.35)"><i class="fas fa-map-pin text-sm"></i></div>',
+            iconSize: [36, 36]
+        })
+    }).addTo(map).bindPopup('Responder location');
+}
+
+async function startSosSequence() {
+    if (!activeSOS) return;
+    sosRadiusIndex = 0;
+    sosAttendedNotified = false;
+    if (sosTimer) clearTimeout(sosTimer);
+    await refreshRegisteredOrgCache();
+    advanceSosRadius();
+}
+
+async function advanceSosRadius() {
+    if (!activeSOS || activeSOS.status === 'attended') return;
+    const radius = SOS_RADII[Math.min(sosRadiusIndex, SOS_RADII.length - 1)];
+    activeSOS.currentRadius = radius;
+    activeSOS.notifiedOrgCount = getNotifiedOrgCount(radius);
+    updateSosStatusPanel();
+    renderSosCircle(radius);
+
+    try {
+        await fetch(`${API_BASE}/sos`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ ...activeSOS, currentRadius: radius, notifiedOrgCount: activeSOS.notifiedOrgCount })
+        });
+    } catch (e) {
+        console.warn('Unable to sync SOS radius update', e);
+    }
+
+    if (activeSOS.status !== 'attended' && sosRadiusIndex < SOS_RADII.length - 1) {
+        sosTimer = setTimeout(() => {
+            sosRadiusIndex += 1;
+            advanceSosRadius();
+        }, 10000);
+    }
+}
+
+function renderSosCircle(radius) {
+    if (!map || !activeSOS) return;
+    if (sosCircle) map.removeLayer(sosCircle);
+    sosCircle = L.circle([activeSOS.lat, activeSOS.lng], {
+        radius,
+        color: '#2563eb',
+        fillColor: '#2563eb',
+        fillOpacity: 0.08,
+        weight: 2,
+        dashArray: '6'
+    }).addTo(map);
+}
+
+function startActiveSOSPolling() {
+    if (activeSOSPollingTimer) clearTimeout(activeSOSPollingTimer);
+    pollActiveSOS();
+}
+
+async function pollActiveSOS() {
+    if (!activeSOS) return;
+    try {
+        const response = await fetch(`${API_BASE}/alerts/${activeSOS.id}`);
+        if (response.ok) {
+            const alert = await response.json();
+            const previousStatus = activeSOS.status;
+            activeSOS = alert;
+            updateSosStatusPanel();
+            if (activeSOS.status === 'attended' && previousStatus !== 'attended' && !sosAttendedNotified) {
+                sosAttendedNotified = true;
+                showAlert('Responder Assigned', `${activeSOS.attendingOrg.name} is attending your SOS now.`, 'success');
+                if (sosTimer) clearTimeout(sosTimer);
+            }
+        }
+    } catch (e) {
+        console.warn('Unable to poll active SOS', e);
+    } finally {
+        activeSOSPollingTimer = setTimeout(pollActiveSOS, SOS_POLL_INTERVAL);
     }
 }
 
@@ -706,17 +1068,246 @@ async function processSOSQueue() {
     }
 }
 
+async function fetchUserHistory() {
+    if (!currentUser || currentUser.role !== 'user') return;
+    const historyList = document.getElementById('history-list');
+    if (!historyList) return;
+
+    historyList.innerHTML = '<div class="text-sm text-slate-500">Loading your SOS history...</div>';
+
+    try {
+        const response = await fetch(`${API_BASE}/alerts/user/${encodeURIComponent(currentUser.email)}?status=all`);
+        if (!response.ok) throw new Error('Unable to load history');
+        const history = await response.json();
+
+        if (!history.length) {
+            historyList.innerHTML = '<div class="text-sm text-slate-500">No past alerts have been attended yet.</div>';
+            return;
+        }
+
+        historyList.innerHTML = history.map(alert => renderHistoryItem(alert)).join('');
+    } catch (err) {
+        historyList.innerHTML = `<div class="text-sm text-rose-600">Failed to load history: ${err.message}</div>`;
+    }
+}
+
+function renderHistoryItem(alert) {
+    const attendedBy = alert.attendingOrg?.name ? `<div class="text-sm text-slate-600">Attended by <strong>${alert.attendingOrg.name}</strong> (${alert.attendingOrg.category || 'Responder'})</div>` : '<div class="text-sm text-slate-500">No responder assigned</div>';
+    const orgDetails = alert.attendingOrg?.name ? `
+        <div class="text-sm text-slate-500">Phone: <a href="tel:${alert.attendingOrg.phone}" class="text-blue-600 underline">${alert.attendingOrg.phone}</a></div>
+        <div class="text-sm text-slate-500">Location: ${alert.attendingOrg.lat?.toFixed(4) || '-'}, ${alert.attendingOrg.lng?.toFixed(4) || '-'}</div>
+    ` : '';
+    const statusLabel = alert.status === 'resolved'
+        ? '<span class="text-emerald-700">Resolved</span>'
+        : alert.status === 'attended'
+            ? '<span class="text-amber-700">Attended</span>'
+            : '<span class="text-slate-400">Pending</span>';
+    const resolvedAt = alert.resolvedAt ? `<div class="text-xs text-slate-400">Resolved at ${new Date(alert.resolvedAt).toLocaleString()}</div>` : '';
+
+    return `
+        <div class="p-4 bg-slate-50 rounded-3xl border border-slate-200 shadow-sm">
+            <div class="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
+                <div>
+                    <div class="font-bold text-slate-900">${alert.type === 'emergency' ? 'Emergency SOS' : 'SOS Alert'}</div>
+                    <div class="text-xs uppercase tracking-widest text-slate-500">${alert.date} • ${alert.time}</div>
+                </div>
+                <div class="text-xs font-bold uppercase tracking-wide">${statusLabel}</div>
+            </div>
+            <div class="mt-3 text-sm text-slate-700">Location: ${alert.lat.toFixed(5)}, ${alert.lng.toFixed(5)}</div>
+            ${attendedBy}
+            ${orgDetails}
+            ${resolvedAt}
+        </div>
+    `;
+}
+
+async function resolveSOS(alertId) {
+    try {
+        const body = currentUser && currentUser.role === 'org' ? { orgId: currentUser.email } : {};
+        const response = await apiFetch(`/alerts/${alertId}/resolve`, { method: 'POST', body: JSON.stringify({}) });
+        const result = await response.json();
+        if (!response.ok) throw new Error(result.message || 'Unable to resolve alert');
+
+        showAlert('SOS Resolved', 'This alert has been marked resolved and removed from the active feed.', 'success');
+        refreshOrgDashboard();
+    } catch (err) {
+        console.error('Resolve SOS failed:', err);
+        showAlert('Resolve Failed', err.message || 'Unable to resolve this alert right now.', 'error');
+    }
+}
+
+async function unattendSOS(alertId) {
+    try {
+        const body = currentUser && currentUser.role === 'org' ? { orgId: currentUser.email } : {};
+        const response = await apiFetch(`/alerts/${alertId}/unattend`, { method: 'POST', body: JSON.stringify({}) });
+        const result = await response.json();
+        if (!response.ok) throw new Error(result.message || 'Unable to unattend alert');
+
+        showAlert('Unattended', 'This alert is now available for other organizations to attend.', 'success');
+        refreshOrgDashboard();
+    } catch (err) {
+        console.error('Unattend SOS failed:', err);
+        showAlert('Unattend Failed', err.message || 'Unable to unattend this alert right now.', 'error');
+    }
+}
+
 // --- Org Dashboard ---
+async function attendSOS(alertId) {
+    const alert = orgAlerts[alertId];
+    if (!alert) return showAlert('SOS Missing', 'This alert is no longer available. Refresh the feed.', 'error');
+    selectedSOS = alert;
+    currentResponderLocation = null;
+
+    if (selectedSOSMarker) {
+        orgMap.removeLayer(selectedSOSMarker);
+        selectedSOSMarker = null;
+    }
+    if (responderMarker) {
+        orgMap.removeLayer(responderMarker);
+        responderMarker = null;
+    }
+
+    selectedSOSMarker = L.marker([alert.lat, alert.lng], {
+        icon: L.divIcon({
+            className: 'custom-marker',
+            html: '<div style="background:#ef4444;color:white;width:36px;height:36px;border-radius:12px;display:flex;align-items:center;justify-content:center;border:3px solid white;box-shadow:0 4px 10px rgba(0,0,0,0.35)"><i class="fas fa-exclamation-triangle text-sm"></i></div>',
+            iconSize: [36, 36]
+        })
+    }).addTo(orgMap).bindPopup(`<b>${alert.userName}</b><br>${alert.type} SOS`).openPopup();
+
+    if (!currentUser) return showAlert('User Missing', 'Please login to attend SOS alerts.', 'error');
+
+    try {
+        const body = { lat: currentUser.lat || 0, lng: currentUser.lng || 0 };
+        const response = await apiFetch(`/alerts/${alert.id}/attend`, {
+            method: 'POST',
+            body: JSON.stringify(body)
+        });
+        const result = await response.json();
+        if (!response.ok) throw new Error(result.message || 'Unable to attend SOS');
+
+        selectedSOS = result.alert;
+        orgAlerts[alertId] = selectedSOS;
+        showAlert('SOS Attended', 'You are now assigned to this alert. Share your exact location to update the user.', 'success');
+        updateSOSDetailPanel();
+    } catch (e) {
+        showAlert('Attend Failed', e.message || 'Unable to attend the SOS right now.', 'error');
+    }
+}
+
+function shareResponderLocation() {
+    if (!selectedSOS) {
+        return showAlert('No SOS Selected', 'Tap Attend on an SOS alert first.', 'warning');
+    }
+    if (!navigator.geolocation) {
+        return showAlert('Geolocation Unsupported', 'Your browser does not support location sharing.', 'error');
+    }
+
+    showAlert('Sharing Location', 'Sharing your current responder location with the feed.', 'info');
+    navigator.geolocation.getCurrentPosition(async position => {
+        currentResponderLocation = {
+            lat: position.coords.latitude,
+            lng: position.coords.longitude
+        };
+
+        if (responderMarker) {
+            orgMap.removeLayer(responderMarker);
+        }
+
+        responderMarker = L.marker([currentResponderLocation.lat, currentResponderLocation.lng], {
+            icon: L.divIcon({
+                className: 'custom-marker',
+                html: '<div style="background:#2563eb;color:white;width:36px;height:36px;border-radius:12px;display:flex;align-items:center;justify-content:center;border:3px solid white;box-shadow:0 4px 10px rgba(0,0,0,0.35)"><i class="fas fa-map-pin text-sm"></i></div>',
+                iconSize: [36, 36]
+            })
+        }).addTo(orgMap).bindPopup('Your responder location').openPopup();
+
+        if (selectedSOSMarker) {
+            const bounds = L.latLngBounds([
+                [selectedSOS.lat, selectedSOS.lng],
+                [currentResponderLocation.lat, currentResponderLocation.lng]
+            ]);
+            orgMap.fitBounds(bounds.pad(0.3));
+        }
+
+        try {
+            const response = await apiFetch(`/alerts/${selectedSOS.id}/location`, {
+                method: 'POST',
+                body: JSON.stringify(currentResponderLocation)
+            });
+            const result = await response.json();
+            if (!response.ok) throw new Error(result.message || 'Location share failed');
+            selectedSOS = result.alert;
+            updateSOSDetailPanel();
+            showAlert('Location Shared', 'Your responder location has been shared with the requester.', 'success');
+        } catch (e) {
+            showAlert('Share Failed', e.message || 'Unable to update responder location right now.', 'error');
+        }
+    }, () => {
+        showAlert('Location Denied', 'Please enable location access in your browser settings.', 'error');
+    }, { enableHighAccuracy: true });
+}
+
+function updateSOSDetailPanel() {
+    const panel = document.getElementById('sos-detail-panel');
+    if (!selectedSOS) {
+        panel?.classList.add('hidden');
+        return;
+    }
+
+    panel?.classList.remove('hidden');
+    document.getElementById('sos-detail-title').innerText = selectedSOS.type === 'emergency' ? 'Emergency Response Interface' : 'Login SOS Response Interface';
+    document.getElementById('sos-detail-location').innerText = `${selectedSOS.lat.toFixed(5)}, ${selectedSOS.lng.toFixed(5)}`;
+    document.getElementById('sos-detail-distance').innerText = selectedSOS.type === 'emergency' ? 'Priority response required' : 'Standard response';
+
+    const directionsLink = document.getElementById('sos-detail-directions');
+    const responderLocation = currentResponderLocation || selectedSOS.responderLocation;
+    const originParam = responderLocation ? `&origin=${responderLocation.lat},${responderLocation.lng}` : '';
+    directionsLink.href = `https://www.google.com/maps/dir/?api=1${originParam}&destination=${selectedSOS.lat},${selectedSOS.lng}`;
+
+    document.getElementById('responder-location').innerText = responderLocation
+        ? `${responderLocation.lat.toFixed(5)}, ${responderLocation.lng.toFixed(5)}`
+        : 'Not shared yet';
+
+    const notes = document.getElementById('sos-detail-notes');
+    if (notes) notes.innerText = selectedSOS.type === 'emergency' ? 'Emergency responders: prioritize and follow safety protocol.' : 'Login SOS allows you to coordinate with the requester and reach them safely.';
+}
+
 function initOrgMap() {
     if (orgMap) return;
     orgMap = L.map('org-map').setView([26.8467, 80.9462], 12);
     L.tileLayer('https://{s}.tile.osm.org/{z}/{x}/{y}.png').addTo(orgMap);
 }
 
+function renderOrgLocationMarker() {
+    if (!orgMap || !currentUser || currentUser.role !== 'org') return;
+    if (!currentUser.lat || !currentUser.lng) return;
+
+    if (orgLocationMarker) {
+        orgMap.removeLayer(orgLocationMarker);
+    }
+
+    const orgIcon = L.divIcon({
+        className: 'custom-marker',
+        html: `<div style="background:#1d4ed8;color:white;width:40px;height:40px;border-radius:14px;display:flex;align-items:center;justify-content:center;border:3px solid white;box-shadow:0 4px 12px rgba(0,0,0,0.25)"><i class="fas fa-building text-sm"></i></div>`,
+        iconSize: [40, 40]
+    });
+
+    orgLocationMarker = L.marker([currentUser.lat, currentUser.lng], { icon: orgIcon })
+        .addTo(orgMap)
+        .bindPopup(`<strong>${currentUser.name}</strong><br>${currentUser.category || 'Organization'}<br>${currentUser.address || 'Registered location'}`)
+        .openPopup();
+
+    orgMap.setView([currentUser.lat, currentUser.lng], 13);
+}
+
 let lastAlertCount = 0;
 async function refreshOrgDashboard() {
     try {
-        const response = await fetch(`${API_BASE}/alerts`);
+        const orgQuery = currentUser?.role === 'org' && currentUser.email
+            ? `?orgEmail=${encodeURIComponent(currentUser.email)}`
+            : '';
+        const response = await fetch(`${API_BASE}/alerts${orgQuery}`);
         if (!response.ok) return;
         const alerts = await response.json();
 
@@ -740,18 +1331,41 @@ async function refreshOrgDashboard() {
             const div = document.createElement('div');
             div.className = `p-5 bg-white border ${isLogin ? 'border-blue-100' : 'border-red-100'} shadow-sm rounded-2xl hover:border-blue-300 transition-all mb-2`;
 
+            orgAlerts[alert.id] = alert;
             let actionButtons = `
-                <div class="flex gap-2 mt-4">
-                    <a href="https://www.google.com/maps/dir/?api=1&destination=${alert.lat},${alert.lng}" target="_blank" class="flex-1 bg-slate-900 text-white text-center py-2 rounded-xl text-xs font-bold hover:bg-black transition-all">
+                <div class="flex flex-col sm:flex-row flex-wrap gap-2 mt-4">
+            `;
+
+            if (alert.status === 'pending') {
+                actionButtons += `
+                    <button onclick="attendSOS(${alert.id})" class="flex-1 min-w-[120px] bg-emerald-600 text-white py-2 rounded-xl text-xs font-bold hover:bg-emerald-700 transition-all">
+                        <i class="fas fa-handshake mr-1"></i> Attend
+                    </button>
+                `;
+            }
+
+            actionButtons += `
+                    <a href="https://www.google.com/maps/dir/?api=1&destination=${alert.lat},${alert.lng}" target="_blank" class="flex-1 min-w-[120px] inline-flex items-center justify-center bg-slate-900 text-white py-2 rounded-xl text-xs font-bold hover:bg-black transition-all">
                         <i class="fas fa-route mr-1"></i> Directions
                     </a>
             `;
 
             if (isLogin && alert.userPhone !== 'N/A') {
                 actionButtons += `
-                    <a href="tel:${alert.userPhone}" class="flex-1 bg-blue-600 text-white text-center py-2 rounded-xl text-xs font-bold hover:bg-blue-700 transition-all">
-                        <i class="fas fa-phone-alt mr-1"></i> Call
+                    <a href="tel:${alert.userPhone}" class="flex-1 min-w-[120px] inline-flex items-center justify-center bg-blue-600 text-white py-2 rounded-xl text-xs font-bold hover:bg-blue-700 transition-all">
+                        <i class="fas fa-phone-alt mr-2"></i> Call
                     </a>
+                `;
+            }
+
+            if (alert.status === 'attended' && alert.attendingOrg && alert.attendingOrg.orgId === currentUser?.email) {
+                actionButtons += `
+                    <button onclick="unattendSOS(${alert.id})" class="flex-1 min-w-[120px] inline-flex items-center justify-center bg-slate-500 text-white py-2 rounded-xl text-xs font-bold hover:bg-slate-600 transition-all">
+                        <i class="fas fa-times-circle mr-2"></i> Unattend
+                    </button>
+                    <button onclick="resolveSOS(${alert.id})" class="flex-1 min-w-[120px] inline-flex items-center justify-center bg-amber-500 text-white py-2 rounded-xl text-xs font-bold hover:bg-amber-600 transition-all">
+                        <i class="fas fa-check-circle mr-2"></i> Resolve
+                    </button>
                 `;
             }
 
@@ -811,6 +1425,7 @@ window.onload = () => {
     }
 
     updateOnlineStatus();
+    attachMapFilterListeners();
 
     // Auto-hide loader after a tiny delay for smooth feel
     setTimeout(hideLoader, 150);

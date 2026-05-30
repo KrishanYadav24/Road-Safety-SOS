@@ -154,6 +154,21 @@ async function sendVerificationEmail(user, baseUrl = APP_BASE_URL) {
     await transporter.sendMail(mailOptions);
 }
 
+// --- AUTH MIDDLEWARE ---
+const jwt = require('jsonwebtoken');
+function authenticateToken(req, res, next) {
+    const authHeader = req.headers['authorization'] || req.headers['Authorization'];
+    const token = authHeader && authHeader.split(' ')[0] === 'Bearer' ? authHeader.split(' ')[1] : null;
+    if (!token) return res.status(401).json({ message: 'Missing auth token' });
+    try {
+        const payload = jwt.verify(token, process.env.JWT_SECRET || 'dev-secret');
+        req.authUser = payload;
+        next();
+    } catch (err) {
+        return res.status(401).json({ message: 'Invalid or expired token' });
+    }
+}
+
 /**
  * MONGODB SCHEMAS
  */
@@ -178,16 +193,48 @@ const alertSchema = new mongoose.Schema({
     id: { type: Number, required: true, unique: true },
     userName: { type: String, default: 'Emergency User' },
     userPhone: { type: String, default: 'N/A' },
+    userEmail: { type: String },
     lat: Number,
     lng: Number,
     time: String,
     date: String,
     type: { type: String, enum: ['login', 'emergency'], default: 'login' },
-    createdAt: { type: Date, default: Date.now }
+    policeSOS: { type: Boolean, default: false },
+    status: { type: String, enum: ['pending', 'attended', 'resolved'], default: 'pending' },
+    attendingOrg: {
+        orgId: String,
+        name: String,
+        phone: String,
+        category: String,
+        lat: Number,
+        lng: Number
+    },
+    responderLocation: {
+        lat: Number,
+        lng: Number,
+        updatedAt: Date
+    },
+    currentRadius: { type: Number, default: 0 },
+    notifiedOrgCount: { type: Number, default: 0 },
+    createdAt: { type: Date, default: Date.now },
+    resolvedAt: { type: Date }
 });
 
 const User = mongoose.model('User', userSchema);
 const Alert = mongoose.model('Alert', alertSchema);
+
+// Organization collection: separate from users for clearer separation
+const organizationSchema = new mongoose.Schema({
+    name: String,
+    email: { type: String, lowercase: true, index: true },
+    phone: String,
+    category: String,
+    address: String,
+    lat: Number,
+    lng: Number,
+    createdAt: { type: Date, default: Date.now }
+});
+const Organization = mongoose.model('Organization', organizationSchema);
 
 app.use(cors());
 app.use(bodyParser.json());
@@ -228,8 +275,11 @@ app.post('/api/register', async (req, res) => {
 
         const verificationToken = crypto.randomBytes(32).toString('hex');
 
+        const bcrypt = require('bcryptjs');
+        const hashed = await bcrypt.hash(password, 10);
+
         const newUser = new User({
-            name, email: normalizedEmail, phone, password, role,
+            name, email: normalizedEmail, phone, password: hashed, role,
             category, address, lat, lng,
             age: age ? Number(age) : undefined,
             gender, bloodGroup,
@@ -238,6 +288,25 @@ app.post('/api/register', async (req, res) => {
         });
 
         await newUser.save();
+
+        // If organization, create an Organization document for easier queries and separate storage
+        if (role === 'org') {
+            try {
+                await Organization.updateOne({ email: normalizedEmail }, {
+                    $set: {
+                        name: name,
+                        email: normalizedEmail,
+                        phone,
+                        category,
+                        address,
+                        lat,
+                        lng
+                    }
+                }, { upsert: true });
+            } catch (orgErr) {
+                console.warn('Failed to create Organization record:', orgErr.message);
+            }
+        }
 
         try {
             await sendVerificationEmail(newUser, requestBaseUrl);
@@ -284,7 +353,8 @@ app.post('/api/login', async (req, res) => {
     try {
         const { email, password, role } = req.body;
         const normalizedEmail = String(email || '').toLowerCase().trim();
-        const user = await User.findOne({ email: normalizedEmail, password, role });
+        const user = await User.findOne({ email: normalizedEmail, role });
+        const bcrypt = require('bcryptjs');
         if (user) {
             if (!user.isVerified) {
                 try {
@@ -298,9 +368,15 @@ app.post('/api/login', async (req, res) => {
                     return res.status(500).json({ message: 'Verify your email first. We could not resend the verification email right now.' });
                 }
             }
+            const match = await bcrypt.compare(String(password || ''), user.password);
+            if (!match) return res.status(401).json({ message: 'Invalid credentials' });
+
+            const jwt = require('jsonwebtoken');
+            const token = jwt.sign({ email: user.email, role: user.role }, process.env.JWT_SECRET || 'dev-secret', { expiresIn: '12h' });
+
             const userObj = user.toObject();
             delete userObj.password;
-            res.json({ user: userObj });
+            res.json({ user: userObj, token });
         } else {
             res.status(401).json({ message: 'Invalid credentials' });
         }
@@ -314,22 +390,192 @@ app.post('/api/sos', async (req, res) => {
     try {
         const alertData = req.body;
         const existingAlert = await Alert.findOne({ id: alertData.id });
+        const normalizedEmail = alertData.userEmail ? String(alertData.userEmail).toLowerCase() : undefined;
+
+        // Ensure status is handled correctly on creation/update
+        const newAlertData = {
+            ...alertData,
+            userEmail: normalizedEmail
+        };
+
         if (!existingAlert) {
-            const newAlert = new Alert(alertData);
+            newAlertData.status = 'pending';
+            const newAlert = new Alert(newAlertData);
             await newAlert.save();
+            return res.json({ message: 'SOS triggered', alert: newAlert });
         }
-        res.json({ message: 'SOS triggered' });
+
+        // If updating an existing alert, don't overwrite status if it's already attended or resolved
+        if (existingAlert.status !== 'pending') {
+            delete newAlertData.status;
+        }
+
+        await Alert.updateOne({ id: alertData.id }, { $set: newAlertData });
+        const updatedAlert = await Alert.findOne({ id: alertData.id });
+        res.json({ message: 'SOS updated', alert: updatedAlert });
     } catch (err) {
+        console.error('SOS Trigger Failed:', err);
         res.status(500).json({ message: 'Error triggering SOS' });
+    }
+});
+
+app.get('/api/alerts/:id', async (req, res) => {
+    try {
+        const alert = await Alert.findOne({ id: Number(req.params.id) });
+        if (!alert) return res.status(404).json({ message: 'Alert not found' });
+        res.json(alert);
+    } catch (err) {
+        console.error('Fetch Alert Failed:', err);
+        res.status(500).json({ message: 'Error fetching alert' });
+    }
+});
+
+app.post('/api/alerts/:id/attend', authenticateToken, async (req, res) => {
+    try {
+        const alert = await Alert.findOne({ id: Number(req.params.id) });
+        if (!alert) return res.status(404).json({ message: 'Alert not found' });
+
+        // IMPORTANT: Guard against double attendance
+        if (alert.status !== 'pending') {
+            return res.status(400).json({ message: 'This alert is already being attended or has been resolved.' });
+        }
+
+        const orgEmail = String(req.authUser.email || '').toLowerCase();
+        const user = await User.findOne({ email: orgEmail });
+        if (!user || user.role !== 'org') return res.status(403).json({ message: 'Only organizations can attend alerts' });
+
+        const { lat, lng } = req.body || {};
+
+        alert.status = 'attended';
+        alert.attendingOrg = {
+            orgId: orgEmail,
+            name: user.name || orgEmail,
+            phone: user.phone || 'N/A',
+            category: user.category || 'Organization',
+            lat: (lat !== undefined) ? lat : user.lat,
+            lng: (lng !== undefined) ? lng : user.lng
+        };
+
+        alert.responderLocation = { lat: alert.attendingOrg.lat, lng: alert.attendingOrg.lng, updatedAt: new Date() };
+        await alert.save();
+
+        res.json({ message: 'Alert marked as attended', alert });
+    } catch (err) {
+        console.error('Attend Alert Failed:', err);
+        res.status(500).json({ message: 'Error attending alert' });
+    }
+});
+
+app.post('/api/alerts/:id/resolve', authenticateToken, async (req, res) => {
+    try {
+        const alert = await Alert.findOne({ id: Number(req.params.id) });
+        if (!alert) return res.status(404).json({ message: 'Alert not found' });
+
+        if (alert.status !== 'attended') {
+            return res.status(400).json({ message: 'Only attended alerts can be resolved' });
+        }
+
+        const orgEmail = String(req.authUser.email || '').toLowerCase();
+        if (!alert.attendingOrg || String(alert.attendingOrg.orgId).toLowerCase() !== orgEmail) {
+            return res.status(403).json({ message: 'Only the attending organization can resolve this alert' });
+        }
+
+        alert.status = 'resolved';
+        alert.resolvedAt = new Date();
+        await alert.save();
+
+        res.json({ message: 'Alert resolved', alert });
+    } catch (err) {
+        console.error('Resolve Alert Failed:', err);
+        res.status(500).json({ message: 'Error resolving alert' });
+    }
+});
+
+app.post('/api/alerts/:id/unattend', authenticateToken, async (req, res) => {
+    try {
+        const alert = await Alert.findOne({ id: Number(req.params.id) });
+        if (!alert) return res.status(404).json({ message: 'Alert not found' });
+
+        const orgEmail = String(req.authUser.email || '').toLowerCase();
+        if (!alert.attendingOrg || String(alert.attendingOrg.orgId).toLowerCase() !== orgEmail) {
+            return res.status(403).json({ message: 'Only the attending organization can unattend this alert' });
+        }
+
+        alert.status = 'pending';
+        alert.attendingOrg = undefined;
+        alert.responderLocation = undefined;
+        alert.resolvedAt = undefined;
+        await alert.save();
+
+        res.json({ message: 'Alert is available again', alert });
+    } catch (err) {
+        console.error('Unattend Alert Failed:', err);
+        res.status(500).json({ message: 'Error unattending alert' });
+    }
+});
+
+app.post('/api/alerts/:id/location', async (req, res) => {
+    try {
+        const { lat, lng } = req.body;
+        const alert = await Alert.findOne({ id: Number(req.params.id) });
+        if (!alert) return res.status(404).json({ message: 'Alert not found' });
+
+        alert.responderLocation = { lat, lng, updatedAt: new Date() };
+        await alert.save();
+
+        res.json({ message: 'Responder location updated', alert });
+    } catch (err) {
+        console.error('Update Responder Location Failed:', err);
+        res.status(500).json({ message: 'Error updating responder location' });
     }
 });
 
 app.get('/api/alerts', async (req, res) => {
     try {
-        const alerts = await Alert.find().sort({ createdAt: -1 });
+        const { status, userEmail, orgEmail } = req.query;
+        const filter = {};
+
+        if (status === 'all') {
+            // return all statuses
+        } else {
+            filter.status = { $ne: 'resolved' };
+        }
+
+        if (userEmail) {
+            filter.userEmail = String(userEmail).toLowerCase();
+        }
+
+        if (orgEmail) {
+            const orgId = String(orgEmail).toLowerCase();
+            // Show pending OR alerts attended by this organization specifically
+            filter.$or = [
+                { status: 'pending' },
+                { status: 'attended', 'attendingOrg.orgId': orgId }
+            ];
+            // Clear status filter since $or handles it
+            if (filter.status) delete filter.status;
+        }
+
+        const alerts = await Alert.find(filter).sort({ createdAt: -1 });
         res.json(alerts);
     } catch (err) {
+        console.error('Error fetching alerts:', err);
         res.status(500).json({ message: 'Error fetching alerts' });
+    }
+});
+
+app.get('/api/alerts/user/:email', async (req, res) => {
+    try {
+        const email = String(req.params.email).toLowerCase();
+        const filter = { userEmail: email };
+        if (req.query.status !== 'all') {
+            filter.status = { $ne: 'pending' };
+        }
+        const alerts = await Alert.find(filter).sort({ createdAt: -1 });
+        res.json(alerts);
+    } catch (err) {
+        console.error('Error fetching user history:', err);
+        res.status(500).json({ message: 'Error fetching user history' });
     }
 });
 
@@ -346,11 +592,86 @@ app.get('/api/stats', async (req, res) => {
 
 app.get('/api/organizations', async (req, res) => {
     try {
-        const orgs = await User.find({ role: 'org', isVerified: true });
-        res.json(orgs);
+        // Prefer dedicated Organization collection; fallback to users with role 'org' for backward compatibility
+        try {
+            const orgs = await Organization.find();
+            if (orgs && orgs.length) return res.json(orgs);
+        } catch (_) {}
+
+        const orgsFromUsers = await User.find({ role: 'org', isVerified: true });
+        res.json(orgsFromUsers.map(u => ({ name: u.name, email: u.email, phone: u.phone, category: u.category, address: u.address, lat: u.lat, lng: u.lng })));
     } catch (err) {
         console.error('Error fetching organizations:', err);
         res.status(500).json({ message: 'Error fetching organizations' });
+    }
+});
+
+// Get profile (user or org) by email
+app.get('/api/profile', authenticateToken, async (req, res) => {
+    try {
+        const email = String(req.query.email || '').toLowerCase();
+        if (!email) return res.status(400).json({ message: 'Email is required' });
+        if (String(req.authUser.email || '').toLowerCase() !== email) return res.status(403).json({ message: 'Access denied' });
+
+        const user = await User.findOne({ email });
+        if (!user) return res.status(404).json({ message: 'User not found' });
+
+        const userObj = user.toObject();
+        delete userObj.password;
+
+        if (user.role === 'org') {
+            const org = await Organization.findOne({ email });
+            if (org) {
+                userObj.orgProfile = org.toObject();
+            }
+        }
+
+        res.json({ user: userObj });
+    } catch (err) {
+        console.error('Fetch profile failed:', err);
+        res.status(500).json({ message: 'Error fetching profile' });
+    }
+});
+
+// Update profile (user or org)
+app.put('/api/profile', authenticateToken, async (req, res) => {
+    try {
+        const { email, updates } = req.body;
+        if (!email) return res.status(400).json({ message: 'Email is required' });
+        const normalizedEmail = String(email).toLowerCase();
+        if (String(req.authUser.email || '').toLowerCase() !== normalizedEmail) return res.status(403).json({ message: 'Access denied' });
+
+        const user = await User.findOne({ email: normalizedEmail });
+        if (!user) return res.status(404).json({ message: 'User not found' });
+
+        const allowed = ['name', 'phone', 'address', 'lat', 'lng', 'category', 'photoUrl'];
+        const set = {};
+        for (const k of Object.keys(updates || {})) {
+            if (allowed.includes(k)) set[k] = updates[k];
+        }
+
+        if (updates.password) {
+            const bcrypt = require('bcryptjs');
+            set.password = await bcrypt.hash(updates.password, 10);
+        }
+
+        await User.updateOne({ email: normalizedEmail }, { $set: set });
+
+        if (user.role === 'org') {
+            // sync organization collection
+            const orgSet = {};
+            ['name', 'phone', 'address', 'lat', 'lng', 'category'].forEach(k => { if (set[k] !== undefined) orgSet[k] = set[k]; });
+            if (Object.keys(orgSet).length) {
+                await Organization.updateOne({ email: normalizedEmail }, { $set: orgSet }, { upsert: true });
+            }
+        }
+
+        const updated = await User.findOne({ email: normalizedEmail });
+        const updatedObj = updated.toObject(); delete updatedObj.password;
+        res.json({ message: 'Profile updated', user: updatedObj });
+    } catch (err) {
+        console.error('Update profile failed:', err);
+        res.status(500).json({ message: 'Error updating profile' });
     }
 });
 
