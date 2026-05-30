@@ -76,7 +76,7 @@ connectMongoDB();
  */
 const SUPPORT_EMAIL = process.env.SUPPORT_EMAIL || 'roadsosdigix@gmail.com';
 const APP_PASSWORD = process.env.APP_PASSWORD || process.env.GMAIL_APP_PASSWORD;
-const APP_BASE_URL = process.env.PRODUCTION_URL || process.env.RENDER_EXTERNAL_URL || 'https://road-safety-sos.onrender.com';
+const APP_BASE_URL = process.env.PRODUCTION_URL || process.env.RENDER_EXTERNAL_URL || 'https://road-safety-sos-27p4.onrender.com';
 
 const transporter = APP_PASSWORD
     ? nodemailer.createTransport({

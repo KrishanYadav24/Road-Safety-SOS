@@ -25,7 +25,7 @@ const SOS_POLL_INTERVAL = 5000;
 // Update the Render URL if your backend is deployed at a different address
 const API_BASE = window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1'
     ? 'http://localhost:3000/api'
-    : 'https://road-safety-sos.onrender.com/api';
+    : 'https://road-safety-sos-27p4.onrender.com/api';
 
 // Persistence Keys
 const SOS_QUEUE_KEY = 'roadsafetysos_sos_queue';
