@@ -98,17 +98,6 @@ const transporter = APP_PASSWORD
     })
     : null;
 
-if (transporter) {
-    transporter.verify((error) => {
-        if (error) {
-            console.error('SMTP connection failed:', error.message);
-        } else {
-            console.log('✅ SMTP server is ready to send verification emails');
-        }
-    });
-} else {
-    console.warn('⚠️ SMTP credentials are not configured. Set APP_PASSWORD (or GMAIL_APP_PASSWORD) in the deployment environment to enable email verification.');
-}
 
 async function sendVerificationEmail(user, baseUrl = APP_BASE_URL) {
     if (!transporter) {
