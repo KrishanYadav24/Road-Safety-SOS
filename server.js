@@ -83,13 +83,18 @@ const transporter = APP_PASSWORD
     host: 'smtp.gmail.com',
     port: 587,
     secure: false,
+    requireTLS: true,
     auth: {
         user: SUPPORT_EMAIL,
         pass: APP_PASSWORD
     },
-        tls: {
-            rejectUnauthorized: false
-        }
+    tls: {
+        rejectUnauthorized: false,
+        minVersion: 'TLSv1.2'
+    },
+    connectionTimeout: 10000,
+    greetingTimeout: 10000,
+    socketTimeout: 10000,
     })
     : null;
 
