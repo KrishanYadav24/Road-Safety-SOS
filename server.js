@@ -459,6 +459,24 @@ app.post('/api/alerts/:id/resolve', authenticateToken, async (req, res) => {
     }
 });
 
+app.delete('/api/alerts/:id', authenticateToken, async (req, res) => {
+    try {
+        const alert = await Alert.findOne({ id: Number(req.params.id) });
+        if (!alert) return res.status(404).json({ message: 'Alert not found' });
+
+        const userEmail = String(req.authUser.email || '').toLowerCase();
+        if (String(alert.userEmail).toLowerCase() !== userEmail) {
+            return res.status(403).json({ message: 'You can only cancel your own SOS alerts' });
+        }
+
+        await Alert.deleteOne({ id: Number(req.params.id) });
+        res.json({ message: 'SOS alert cancelled and removed' });
+    } catch (err) {
+        console.error('Cancel Alert Failed:', err);
+        res.status(500).json({ message: 'Error cancelling alert' });
+    }
+});
+
 app.post('/api/alerts/:id/unattend', authenticateToken, async (req, res) => {
     try {
         const alert = await Alert.findOne({ id: Number(req.params.id) });

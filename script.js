@@ -743,16 +743,49 @@ function setSupportResource(type) {
         if (el) el.checked = false;
     });
 
-    const selectedId = type === 'trauma' ? 'check-trauma' : type === 'clinic' ? 'check-clinic' : 'check-mechanics';
-    const selected = document.getElementById(selectedId);
-    if (selected) selected.checked = true;
+    // Update active button styling
+    const allBtns = ['hospital','police','trauma','clinic','ambulance','mechanics','puncture','showroom','orgs'];
+    allBtns.forEach(t => {
+        const btn = document.getElementById(`btn-${t}`);
+        if (btn) btn.classList.remove('active');
+    });
+    const activeBtn = document.getElementById(`btn-${type}`);
+    if (activeBtn) activeBtn.classList.add('active');
 
-    const statusText = type === 'trauma'
-        ? 'Showing nearby Trauma Centers only. This search is separate from SOS broadcasts.'
-        : type === 'clinic'
-            ? 'Showing nearby Clinics only. This search is separate from SOS broadcasts.'
-            : 'Showing nearby Mechanics only. This search is separate from SOS broadcasts.';
-    document.getElementById('support-resource-status').innerText = statusText;
+    const typeToCheckbox = {
+        hospital:   'check-hospital',
+        police:     'check-police',
+        trauma:     'check-trauma',
+        clinic:     'check-clinic',
+        ambulance:  'check-ambulance',
+        mechanics:  'check-mechanics',
+        puncture:   'check-puncture',
+        showroom:   'check-showroom',
+        orgs:       'check-orgs'
+    };
+
+    const typeToLabel = {
+        hospital:   'Hospitals',
+        police:     'Police Stations',
+        trauma:     'Trauma Centers',
+        clinic:     'Clinics',
+        ambulance:  'Ambulance Services',
+        mechanics:  'Mechanics',
+        puncture:   'Puncture Shops',
+        showroom:   'Showrooms',
+        orgs:       'Verified Organisations'
+    };
+
+    const checkboxId = typeToCheckbox[type];
+    if (checkboxId) {
+        const el = document.getElementById(checkboxId);
+        if (el) el.checked = true;
+    }
+
+    const label = typeToLabel[type] || type;
+    const statusEl = document.getElementById('support-resource-status');
+    if (statusEl) statusEl.innerText = `Showing nearby ${label} only. This search is separate from SOS broadcasts.`;
+
     updateMap();
 }
 
@@ -941,26 +974,88 @@ function getNotifiedOrgCount(radius) {
 }
 
 function showSosStatusPanel() {
-    document.getElementById('sos-status-panel')?.classList.remove('hidden');
+    // Show the pulsing trigger button below the SOS btn
+    document.getElementById('sos-status-trigger')?.classList.remove('hidden');
+    // Auto-open the modal immediately after SOS is raised
+    openSosModal();
     updateSosStatusPanel();
+}
+
+function openSosModal() {
+    const modal = document.getElementById('sos-status-panel');
+    if (!modal) return;
+    modal.classList.remove('hidden');
+    setTimeout(() => modal.classList.add('modal-active'), 10);
+}
+
+function closeSosModal() {
+    const modal = document.getElementById('sos-status-panel');
+    if (!modal) return;
+    modal.classList.remove('modal-active');
+    setTimeout(() => modal.classList.add('hidden'), 200);
+}
+
+function cancelSOSAndClose() {
+    if (!activeSOS) {
+        closeSosModal();
+        document.getElementById('sos-status-trigger')?.classList.add('hidden');
+        return;
+    }
+
+    showConfirm(
+        'Cancel SOS?',
+        'This will permanently remove your active SOS broadcast. Responders will no longer see it.',
+        async () => {
+            const alertId = activeSOS.id;
+
+            // Stop timers and clean up map immediately
+            if (activeSOSPollingTimer) { clearTimeout(activeSOSPollingTimer); activeSOSPollingTimer = null; }
+            if (sosTimer) { clearTimeout(sosTimer); sosTimer = null; }
+            if (sosCircle && map) { map.removeLayer(sosCircle); sosCircle = null; }
+            if (responderMarker && map) { map.removeLayer(responderMarker); responderMarker = null; }
+            activeSOS = null;
+            sosRadiusIndex = 0;
+            sosAttendedNotified = false;
+
+            closeSosModal();
+            document.getElementById('sos-status-trigger')?.classList.add('hidden');
+
+            // Delete from server so it disappears from history too
+            try {
+                const response = await apiFetch(`/alerts/${alertId}`, { method: 'DELETE' });
+                if (!response.ok) {
+                    const result = await response.json();
+                    throw new Error(result.message || 'Delete failed');
+                }
+                showAlert('SOS Cancelled', 'Your SOS broadcast has been removed.', 'success', () => fetchUserHistory());
+            } catch (err) {
+                showAlert('SOS Stopped', 'Broadcast stopped locally. It may still appear briefly in history.', 'info', () => fetchUserHistory());
+            }
+        }
+    );
 }
 
 function updateSosStatusPanel() {
     if (!activeSOS) return;
     document.getElementById('sos-current-status').innerText = activeSOS.status === 'attended'
-        ? 'A responder organization is on the way'
+        ? 'A responder organisation is on the way'
         : activeSOS.policeSOS
             ? 'Police SOS requested and broadcast is active'
-            : 'SOS broadcasting — waiting for organization response';
+            : 'SOS broadcasting — waiting for organisation response';
     document.getElementById('sos-current-radius').innerText = `${activeSOS.currentRadius || 0} meters`;
     document.getElementById('sos-notified-count').innerText = `${activeSOS.notifiedOrgCount || 0} organisations notified`;
+
+    // Update radius progress bar (max radius = 5000m)
+    const radiusPct = Math.min(((activeSOS.currentRadius || 0) / 5000) * 100, 100);
+    const bar = document.getElementById('sos-radius-bar');
+    if (bar) bar.style.width = radiusPct + '%';
 
     if (activeSOS.attendingOrg && activeSOS.attendingOrg.name) {
         document.getElementById('sos-attending-org').innerText = `${activeSOS.attendingOrg.name} (${activeSOS.attendingOrg.category || 'Responder'})`;
     } else {
         document.getElementById('sos-attending-org').innerText = activeSOS.policeSOS
             ? 'Police stations are also alerted for this SOS'
-            : 'No organization has responded yet';
+            : 'No organisation has responded yet';
     }
 
     if (activeSOS.responderLocation && activeSOS.responderLocation.lat) {
